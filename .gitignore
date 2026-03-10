@@ -1,0 +1,41 @@
+# .gitignore
+__pycache__/
+chrome-profile/
+chrome-profile1/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.db
+*.sqlite
+*.bak
+*.tmp
+*.swp
+*.swo
+*.~
+.DS_Store
+Thumbs.db
+.env
+venv/
+
+# Rust / Tauri build artifacts
+target/
+src-tauri/target/
+
+# Игнорировать временные и кэш-файлы
+*.cache
+*.egg-info/
+
+# Игнорировать Jupyter
+*.ipynb_checkpoints
+
+# Игнорировать HTML
+*.html
+
+# Игнорировать тестовые и временные файлы
+*.test
+*.tmp
+
+# Игнорировать личные настройки
+.vscode/
+.idea/

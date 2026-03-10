@@ -1,0 +1,89 @@
+/* Убраны все стандартные стили Vite/Tauri — используем только Tailwind */
+
+/* Custom scrollbar для textarea */
+textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+textarea::-webkit-scrollbar-track {
+  background: #0f0f1a;
+  border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb {
+  background: #1f3a5f;
+  border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+  background: #2d4a6f;
+}
+
+/* Custom range slider */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00d9ff 0%, #00c851 100%);
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(0, 217, 255, 0.5);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00d9ff 0%, #00c851 100%);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 10px rgba(0, 217, 255, 0.5);
+}
+
+/* Checkbox custom */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #1f3a5f;
+  border-radius: 4px;
+  background: #0f0f1a;
+  cursor: pointer;
+  position: relative;
+}
+
+input[type="checkbox"]:checked {
+  background: linear-gradient(135deg, #00d9ff 0%, #00c851 100%);
+  border-color: transparent;
+}
+
+input[type="checkbox"]:checked::after {
+  content: "✓";
+  position: absolute;
+  color: white;
+  font-size: 14px;
+  font-weight: bold;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Focus states */
+input:focus,
+textarea:focus,
+button:focus {
+  outline: none;
+}
+
+/* Button active state */
+button:active {
+  transform: scale(0.98);
+}
+
+/* Disabled state */
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

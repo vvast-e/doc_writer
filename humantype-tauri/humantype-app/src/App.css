@@ -1,5 +1,3 @@
-/* Убраны все стандартные стили Vite/Tauri — используем только Tailwind */
-
 /* Custom scrollbar для textarea */
 textarea::-webkit-scrollbar {
   width: 8px;
@@ -29,6 +27,11 @@ input[type="range"]::-webkit-slider-thumb {
   background: linear-gradient(135deg, #00d9ff 0%, #00c851 100%);
   cursor: pointer;
   box-shadow: 0 0 10px rgba(0, 217, 255, 0.5);
+  transition: transform 0.2s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
 }
 
 input[type="range"]::-moz-range-thumb {
@@ -39,6 +42,11 @@ input[type="range"]::-moz-range-thumb {
   cursor: pointer;
   border: none;
   box-shadow: 0 0 10px rgba(0, 217, 255, 0.5);
+  transition: transform 0.2s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.1);
 }
 
 /* Checkbox custom */
@@ -52,6 +60,11 @@ input[type="checkbox"] {
   background: #0f0f1a;
   cursor: pointer;
   position: relative;
+  transition: all 0.2s ease;
+}
+
+input[type="checkbox"]:hover {
+  border-color: #00d9ff;
 }
 
 input[type="checkbox"]:checked {
@@ -86,4 +99,34 @@ button:active {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* Fade-in animation */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+/* Pulse slow animation */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s ease-in-out infinite;
 }

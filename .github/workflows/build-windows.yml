@@ -1,0 +1,68 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [feature/bundled-chromium-multi-page]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: humantype-tauri/node_modules
+          key: npm-${{ hashFiles('humantype-tauri/package-lock.json') }}
+
+      - name: Install npm dependencies
+        working-directory: humantype-tauri
+        run: npm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install playwright pyinstaller
+          playwright install chromium
+
+      - name: Build Python script for Windows
+        run: |
+          pyinstaller --onefile --hidden-import=google_docs_typist --name=python-script main.py
+          New-Item -ItemType Directory -Force -Path humantype-tauri/src-tauri/resources
+          Copy-Item dist/python-script.exe humantype-tauri/src-tauri/resources/
+
+      - name: Download Chromium for Windows
+        run: |
+          $chromiumPath = python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); print(p.chromium.executable_path); p.stop()"
+          Write-Host "Chromium path: $chromiumPath"
+          $chromiumDir = Split-Path (Split-Path $chromiumPath)
+          $chromiumSubdir = Split-Path $chromiumDir -Leaf
+          $parentDir = Split-Path $chromiumDir
+          $targetDir = "humantype-tauri/src-tauri/resources/chromium/$chromiumSubdir"
+          New-Item -ItemType Directory -Force -Path $targetDir
+          Copy-Item "$chromiumDir/*" $targetDir -Recurse -Force
+          Write-Host "Copied Chromium from $chromiumDir"
+
+      - name: Build Tauri app
+        working-directory: humantype-tauri
+        run: npm run tauri build
+
+      - name: Upload Windows build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            humantype-tauri/src-tauri/target/release/bundle/msi/
+            humantype-tauri/src-tauri/target/release/bundle/nsis/

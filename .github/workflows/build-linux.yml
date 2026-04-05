@@ -63,11 +63,10 @@ jobs:
           CHROMIUM_CACHE="$HOME/.cache/ms-playwright"
           CHROMIUM_DIR=$(find "$CHROMIUM_CACHE" -name "chrome-linux64" -type d | head -1)
           if [ -n "$CHROMIUM_DIR" ]; then
-            PARENT_DIR=$(dirname "$CHROMIUM_DIR")
-            CHROMIUM_SUBDIR=$(basename "$PARENT_DIR")
-            mkdir -p humantype-tauri/src-tauri/resources/chromium
-            cp -r "$CHROMIUM_DIR" "humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR"
-            echo "Copied Chromium from $CHROMIUM_DIR"
+            CHROMIUM_SUBDIR=$(basename "$CHROMIUM_DIR")
+            mkdir -p "humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR"
+            cp -r "$CHROMIUM_DIR/"* "humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR/"
+            echo "Copied Chromium from $CHROMIUM_DIR to humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR"
           else
             echo "Chromium not found!"
             exit 1

@@ -47,13 +47,12 @@ jobs:
         run: |
           $chromiumPath = python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); print(p.chromium.executable_path); p.stop()"
           Write-Host "Chromium path: $chromiumPath"
-          $chromiumDir = Split-Path (Split-Path $chromiumPath)
-          $chromiumSubdir = Split-Path $chromiumDir -Leaf
-          $parentDir = Split-Path $chromiumDir
-          $targetDir = "humantype-tauri/src-tauri/resources/chromium/$chromiumSubdir"
+          $chromeWinDir = Split-Path $chromiumPath
+          $chromeWinSubdir = Split-Path $chromeWinDir -Leaf
+          $targetDir = "humantype-tauri/src-tauri/resources/chromium/$chromeWinSubdir"
           New-Item -ItemType Directory -Force -Path $targetDir
-          Copy-Item "$chromiumDir/*" $targetDir -Recurse -Force
-          Write-Host "Copied Chromium from $chromiumDir"
+          Copy-Item "$chromeWinDir/*" $targetDir -Recurse -Force
+          Write-Host "Copied Chromium from $chromeWinDir to $targetDir"
 
       - name: Build Tauri app
         working-directory: humantype-tauri

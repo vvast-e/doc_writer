@@ -26,7 +26,7 @@
     "targets": "all",
     "resources": [
       "resources/chromium/**/*",
-      "resources/python-script.exe"
+      "resources/python-script*"
     ],
     "icon": [
       "icons/32x32.png",

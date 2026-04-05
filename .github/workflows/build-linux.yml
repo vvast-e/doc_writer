@@ -61,7 +61,7 @@ jobs:
           p.stop()
           "
           CHROMIUM_CACHE="$HOME/.cache/ms-playwright"
-          CHROMIUM_DIR=$(find "$CHROMIUM_CACHE" -name "chrome-linux" -type d | head -1)
+          CHROMIUM_DIR=$(find "$CHROMIUM_CACHE" -name "chrome-linux64" -type d | head -1)
           if [ -n "$CHROMIUM_DIR" ]; then
             PARENT_DIR=$(dirname "$CHROMIUM_DIR")
             CHROMIUM_SUBDIR=$(basename "$PARENT_DIR")

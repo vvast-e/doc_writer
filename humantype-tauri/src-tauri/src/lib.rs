@@ -42,7 +42,7 @@ fn chromium_subdir() -> &'static str {
     match std::env::consts::OS {
         "windows" => "chrome-win64",
         "macos" => "chrome-mac",
-        "linux" => "chrome-linux",
+        "linux" => "chrome-linux64",
         _ => "chrome-win64",
     }
 }

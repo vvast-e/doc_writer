@@ -41,8 +41,8 @@ node_modules/
 # Игнорировать Jupyter
 *.ipynb_checkpoints
 
-# Игнорировать HTML
-*.html
+# Игнорировать HTML (кроме index.html)
+!humantype-tauri/index.html
 
 # Игнорировать тестовые и временные файлы
 *.test

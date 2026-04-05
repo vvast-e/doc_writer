@@ -1,0 +1,85 @@
+name: Build Linux
+
+on:
+  push:
+    branches: [feature/bundled-chromium-multi-page]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential curl wget file \
+            libssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libappindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: humantype-tauri/node_modules
+          key: npm-${{ hashFiles('humantype-tauri/package-lock.json') }}
+
+      - name: Install npm dependencies
+        working-directory: humantype-tauri
+        run: npm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install playwright pyinstaller
+          playwright install chromium
+
+      - name: Build Python script for Linux
+        run: |
+          pyinstaller --onefile --hidden-import=google_docs_typist --name=python-script main.py
+          mkdir -p humantype-tauri/src-tauri/resources
+          cp dist/python-script humantype-tauri/src-tauri/resources/
+
+      - name: Download Chromium for Linux
+        run: |
+          python -c "
+          from playwright.sync_api import sync_playwright
+          p = sync_playwright().start()
+          path = p.chromium.executable_path
+          print(f'Chromium path: {path}')
+          p.stop()
+          "
+          CHROMIUM_CACHE="$HOME/.cache/ms-playwright"
+          CHROMIUM_DIR=$(find "$CHROMIUM_CACHE" -name "chrome-linux" -type d | head -1)
+          if [ -n "$CHROMIUM_DIR" ]; then
+            PARENT_DIR=$(dirname "$CHROMIUM_DIR")
+            CHROMIUM_SUBDIR=$(basename "$PARENT_DIR")
+            mkdir -p humantype-tauri/src-tauri/resources/chromium
+            cp -r "$CHROMIUM_DIR" "humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR"
+            echo "Copied Chromium from $CHROMIUM_DIR"
+          else
+            echo "Chromium not found!"
+            exit 1
+          fi
+
+      - name: Build Tauri app
+        working-directory: humantype-tauri
+        run: npm run tauri build
+
+      - name: Upload Linux build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            humantype-tauri/src-tauri/target/*/release/bundle/

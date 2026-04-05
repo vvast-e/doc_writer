@@ -82,4 +82,5 @@ jobs:
         with:
           name: linux-build
           path: |
-            humantype-tauri/src-tauri/target/*/release/bundle/
+            humantype-tauri/src-tauri/target/release/bundle/deb/
+            humantype-tauri/src-tauri/target/release/bundle/rpm/

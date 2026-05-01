@@ -56,12 +56,11 @@ jobs:
 
       - name: Build Tauri app
         working-directory: humantype-tauri
-        run: npm run tauri build
+        run: npm run tauri build -- --bundles nsis
 
-      - name: Upload Windows build artifacts
+      - name: Upload Windows NSIS installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
+          name: windows-nsis-installer
           path: |
-            humantype-tauri/src-tauri/target/release/bundle/msi/
             humantype-tauri/src-tauri/target/release/bundle/nsis/

@@ -63,30 +63,113 @@ fn python_script_name() -> &'static str {
     }
 }
 
+fn python_script_candidates(resources_root: &std::path::Path) -> Vec<PathBuf> {
+    vec![
+        resources_root.join(python_script_name()),
+        resources_root.join("resources").join(python_script_name()),
+    ]
+}
+
+fn locate_python_script(resources_root: &std::path::Path) -> Option<PathBuf> {
+    python_script_candidates(resources_root)
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// Корни, где искать директорию `chromium` после сборки ресурсов.
+/// Бывает `<resource>/chromium` или `<resource>/resources/chromium` после распаковки.
+fn chromium_parent_candidates(resources_root: &std::path::Path) -> Vec<PathBuf> {
+    vec![
+        resources_root.join("chromium"),
+        resources_root.join("resources").join("chromium"),
+    ]
+}
+
+fn try_chromium_at_standard_layout(ch_home: &std::path::Path) -> Option<PathBuf> {
+    let subdir = chromium_subdir();
+    let exe = chromium_exe_name();
+    let candidate = ch_home.join(subdir).join(exe);
+    if candidate.is_file() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Playwright кладёт бинари в `<...>/chromium-<rev>/<chrome-*>`,
+/// локальная сборка могла завернуть только `chromium-1208` без верхнего `chrome-win64`
+/// или наоборот — как в CI (сразу `chrome-win64` внутри `chromium/`).
+fn try_chromium_via_playwright_nesting(ch_home: &std::path::Path) -> Option<PathBuf> {
+    let subdir = chromium_subdir();
+    let exe = chromium_exe_name();
+    let Ok(entries) = std::fs::read_dir(ch_home) else {
+        return None;
+    };
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        let direct = entry_path.join(subdir).join(exe);
+        if direct.is_file() {
+            return Some(direct);
+        }
+    }
+    None
+}
+
+fn locate_chromium_exe(resources_root: &std::path::Path) -> Option<PathBuf> {
+    for ch_home in chromium_parent_candidates(resources_root) {
+        if !ch_home.is_dir() {
+            continue;
+        }
+        if let Some(p) = try_chromium_at_standard_layout(&ch_home) {
+            return Some(p);
+        }
+        if let Some(p) = try_chromium_via_playwright_nesting(&ch_home) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Каталог, который передаётся в PLAYWRIGHT_BROWSERS_PATH: корень упакованного `chromium/`.
+fn chromium_bundle_home_for_exe(resources_root: &std::path::Path, chromium_exe: &std::path::Path) -> PathBuf {
+    for cand in chromium_parent_candidates(resources_root) {
+        if cand.is_dir() && chromium_exe.starts_with(&cand) {
+            return cand;
+        }
+    }
+    resources_root.join("chromium")
+}
+
 #[tauri::command]
 async fn find_chromium(app: tauri::AppHandle) -> Result<String, String> {
     let resources = get_resources_dir(&app)?;
-    let subdir = chromium_subdir();
-    let exe = chromium_exe_name();
-    let chromium = resources.join("chromium").join(subdir).join(exe);
+    let chromium = locate_chromium_exe(&resources).ok_or_else(|| {
+        let tried: Vec<PathBuf> = chromium_parent_candidates(&resources)
+            .into_iter()
+            .map(|ch| ch.join(chromium_subdir()).join(chromium_exe_name()))
+            .collect();
+        format!(
+            "Chromium не найден. Искали: {:?}. Приложите в bundle структуру Playwright/Chromium или путь chromium/{}/{}. ",
+            tried,
+            chromium_subdir(),
+            chromium_exe_name()
+        )
+    })?;
 
-    if chromium.exists() {
-        Ok(chromium.to_string_lossy().to_string())
-    } else {
-        Err(format!("Chromium not found at: {}", chromium.display()))
-    }
+    Ok(chromium.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 async fn find_python_script(app: tauri::AppHandle) -> Result<String, String> {
     let resources = get_resources_dir(&app)?;
-    let script = resources.join(python_script_name());
-
-    if script.exists() {
-        Ok(script.to_string_lossy().to_string())
-    } else {
-        Err(format!("Python script not found at: {}", script.display()))
-    }
+    let script = locate_python_script(&resources).ok_or_else(|| {
+        let tried = python_script_candidates(&resources);
+        format!("Python script not found. Tried: {:?}", tried)
+    })?;
+    Ok(script.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -168,9 +251,10 @@ async fn start_typing(
 
     let python_script = find_python_script(app.clone()).await?;
     let chromium_path = find_chromium(app.clone()).await?;
+    let chromium_exe_path = PathBuf::from(chromium_path.clone());
 
     let resources = get_resources_dir(&app)?;
-    let chromium_dir = resources.join("chromium");
+    let chromium_dir = chromium_bundle_home_for_exe(&resources, &chromium_exe_path);
 
     let mut cmd_args: Vec<String> = Vec::new();
     cmd_args.push("--doc-url".into());

@@ -34,12 +34,20 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install playwright pyinstaller
+          pip install -r requirements-sidecar.txt pyinstaller
           playwright install chromium
+
+      - name: Verify Python deps
+        run: |
+          python -c "import numpy, playwright; print('numpy', numpy.__version__); print('playwright', playwright.__version__)"
 
       - name: Build Python script for Windows
         run: |
-          pyinstaller --onefile --hidden-import=google_docs_typist --name=python-script main.py
+          pyinstaller --onefile `
+            --name=python-script `
+            --collect-all numpy `
+            --collect-all playwright `
+            main.py
           New-Item -ItemType Directory -Force -Path humantype-tauri/src-tauri/resources
           Copy-Item dist/python-script.exe humantype-tauri/src-tauri/resources/
 
@@ -58,9 +66,9 @@ jobs:
         working-directory: humantype-tauri
         run: npm run tauri build -- --bundles nsis
 
-      - name: Upload Windows NSIS installer
+      - name: Upload Windows NSIS installer (exe only)
         uses: actions/upload-artifact@v4
         with:
           name: windows-nsis-installer
-          path: |
-            humantype-tauri/src-tauri/target/release/bundle/nsis/
+          path: humantype-tauri/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

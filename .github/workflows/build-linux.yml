@@ -42,12 +42,20 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install playwright pyinstaller
+          pip install -r requirements-sidecar.txt pyinstaller
           playwright install chromium
+
+      - name: Verify Python deps
+        run: |
+          python -c "import numpy, playwright; print('numpy', numpy.__version__); print('playwright', playwright.__version__)"
 
       - name: Build Python script for Linux
         run: |
-          pyinstaller --onefile --hidden-import=google_docs_typist --name=python-script main.py
+          pyinstaller --onefile \
+            --name=python-script \
+            --collect-all numpy \
+            --collect-all playwright \
+            main.py
           mkdir -p humantype-tauri/src-tauri/resources
           cp dist/python-script humantype-tauri/src-tauri/resources/
 

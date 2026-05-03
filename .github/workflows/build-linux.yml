@@ -47,7 +47,7 @@ jobs:
 
       - name: Verify Python deps
         run: |
-          python -c "import numpy, playwright; print('numpy', numpy.__version__); print('playwright', playwright.__version__)"
+          python -c "import numpy; from importlib.metadata import version; print('numpy', numpy.__version__); print('playwright', version('playwright'))"
 
       - name: Build Python script for Linux
         run: |

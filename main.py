@@ -59,14 +59,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-delay",
         type=int,
-        default=50,
-        help="Минимальная задержка между символами в миллисекундах (по умолчанию 50).",
+        default=110,
+        help="Минимальная задержка между символами в миллисекундах (по умолчанию 110).",
     )
     parser.add_argument(
         "--max-delay",
         type=int,
-        default=220,
-        help="Максимальная задержка между символами в миллисекундах (по умолчанию 220).",
+        default=380,
+        help="Максимальная задержка между символами в миллисекундах (по умолчанию 380).",
     )
     parser.add_argument(
         "--close-browser",

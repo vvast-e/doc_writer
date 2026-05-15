@@ -88,20 +88,6 @@ async def paragraph_micro_navigation(page: Page) -> None:
     await asyncio.sleep(random.uniform(0.18, 0.45))
 
 
-async def get_input_frame(page: Page):
-    """Возвращает Frame скрытого iframe — сюда Docs реально принимает клавиатуру"""
-    try:
-        iframe = await page.wait_for_selector(
-            ".docs-texteventtarget-iframe", timeout=8000
-        )
-        frame = await iframe.content_frame()
-        _log("✅ Доступ к input-iframe получен")
-        return frame
-    except Exception as e:
-        _log(f"⚠️ Iframe не найден, fallback на main page: {e}")
-        return page
-
-
 async def focus_document_body(page: Page) -> None:
     """Надёжный фокус"""
     strategies = [
@@ -348,15 +334,14 @@ async def run_google_docs_typing(
                 return
 
             _log("Фокус установлен, начинаем печатать текст...")
-            working = await get_input_frame(page)
             try:
                 if type_text_fn:
                     await type_text_fn(
-                        working, text, min_delay_ms, max_delay_ms
+                        page, text, min_delay_ms, max_delay_ms
                     )
                 else:
                     await human_type_text(
-                        working, text, min_delay_ms, max_delay_ms,
+                        page, text, min_delay_ms, max_delay_ms,
                         stop_flag=stop_flag,
                     )
             except TypingStopped:

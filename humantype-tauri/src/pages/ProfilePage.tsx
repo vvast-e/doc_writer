@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -13,6 +14,29 @@ export function ProfilePage() {
   const [isChecking, setIsChecking] = useState(false);
   const [launched, setLaunched] = useState(false);
   const [launchError, setLaunchError] = useState("");
+  const launchedRef = useRef(false);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    listen("chromium:exited", async () => {
+      if (!launchedRef.current) return;
+      try {
+        const exists = await invoke<boolean>("check_profile_exists");
+        if (exists) {
+          navigate("/main");
+        }
+      } catch (err) {
+        console.error("auto-check failed:", err);
+      }
+    })
+      .then((u) => {
+        unlisten = u;
+      })
+      .catch((err) => console.error("listen chromium:exited failed:", err));
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [navigate]);
 
   const launchChromium = async () => {
     setLaunchError("");
@@ -20,6 +44,7 @@ export function ProfilePage() {
     try {
       await invoke("open_chromium_for_login");
       setLaunched(true);
+      launchedRef.current = true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setLaunchError(message);
@@ -36,7 +61,14 @@ export function ProfilePage() {
       if (exists) {
         navigate("/main");
       } else {
-        alert("Профиль ещё не создан. Пожалуйста, войдите в Google аккаунт в Chromium и закройте его.");
+        const profilePath = await invoke<string>("get_profile_path").catch(() => "(не удалось получить)");
+        alert(
+          `Профиль ещё не создан.\n\n` +
+            `Проверяли: ${profilePath}\n` +
+            `Ожидаются файлы: "Local State" и папка "Default".\n\n` +
+            `Откройте Chromium, войдите в Google и закройте окно. ` +
+            `Если не помогает — посмотрите лог: %LOCALAPPDATA%\\com.user.humantype-tauri\\logs\\sidecar.log`,
+        );
       }
     } catch (err) {
       console.error("Failed to check profile:", err);

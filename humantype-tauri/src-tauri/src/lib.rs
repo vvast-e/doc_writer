@@ -194,31 +194,65 @@ async fn check_profile_exists(app: tauri::AppHandle) -> Result<bool, String> {
     let data_dir = get_app_data_dir(&app)?;
     let profile_dir = data_dir.join("chrome-profile");
 
-    if !profile_dir.exists() {
+    if !profile_dir.is_dir() {
         return Ok(false);
     }
 
-    let mut entries = match std::fs::read_dir(&profile_dir) {
-        Ok(e) => e,
-        Err(e) => return Err(e.to_string()),
-    };
-    Ok(entries.next().is_some())
+    let local_state = profile_dir.join("Local State");
+    let default_dir = profile_dir.join("Default");
+    Ok(local_state.is_file() && default_dir.is_dir())
 }
 
 #[tauri::command]
 async fn open_chromium_for_login(app: tauri::AppHandle) -> Result<(), String> {
     let chromium_path = find_chromium(app.clone()).await?;
     let profile_path = get_profile_path(app.clone()).await?;
+    let log_dir = get_log_dir(&app)?;
 
     let mut cmd = Command::new(&chromium_path);
-    cmd.arg("--user-data-dir").arg(&profile_path);
+    cmd.arg(format!("--user-data-dir={}", profile_path));
     cmd.arg("--no-first-run");
     cmd.arg("--no-default-browser-check");
+    cmd.arg("--no-sandbox");
     cmd.arg("--ignore-certificate-errors");
-    cmd.arg("--disable-features=NetworkService");
+    cmd.arg("--disable-blink-features=AutomationControlled");
     cmd.arg("https://accounts.google.com");
 
-    cmd.spawn().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    append_log(
+        &log_dir,
+        &format!(
+            "[chromium-login] spawn: exe={:?} profile={:?}",
+            chromium_path, profile_path
+        ),
+    );
+
+    let mut child = cmd.spawn().map_err(|e| {
+        let msg = format!("[chromium-login] spawn failed: {}", e);
+        append_log(&log_dir, &msg);
+        e.to_string()
+    })?;
+
+    let app_for_task = app.clone();
+    let log_dir_for_task = log_dir.clone();
+    tokio::spawn(async move {
+        let status = child.wait().await;
+        let status_str = match &status {
+            Ok(s) => format!("{:?}", s),
+            Err(e) => format!("wait-error: {}", e),
+        };
+        append_log(
+            &log_dir_for_task,
+            &format!("[chromium-login] exited: {}", status_str),
+        );
+        let _ = app_for_task.emit("chromium:exited", status_str);
+    });
+
     Ok(())
 }
 

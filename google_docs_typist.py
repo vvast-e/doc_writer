@@ -3,11 +3,16 @@ import logging
 import math
 import random
 import re
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
 from playwright.async_api import async_playwright, BrowserContext, Page
+
+
+class TypingStopped(Exception):
+    """Поднимается из цикла набора, когда пришла stop-команда."""
 
 logger = logging.getLogger("google_docs_typist")
 
@@ -131,6 +136,7 @@ async def human_type_text(
     min_delay_ms: int,
     max_delay_ms: int,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    stop_flag: Optional[threading.Event] = None,
 ) -> None:
     """
     Эмуляция набора с A1/A4/B1/B2/C3/G1/G2 (без искусственных опечаток и без сессий).
@@ -144,6 +150,10 @@ async def human_type_text(
     def report_progress() -> None:
         if progress_callback:
             progress_callback(typed, total)
+
+    def check_stop() -> None:
+        if stop_flag is not None and stop_flag.is_set():
+            raise TypingStopped()
 
     warmup_end = random.randint(50, 150)
     warmup_peak = random.uniform(1.34, 1.54)
@@ -164,6 +174,7 @@ async def human_type_text(
         idx_in_word = 0
 
         for ch in segment:
+            check_stop()
             wm = _warmup_multiplier(typed, warmup_end, warmup_peak)
 
             if ch == "\n":
@@ -248,11 +259,20 @@ def load_text(text_file: Path) -> str:
     return text_file.read_text(encoding="utf-8")
 
 
-async def wait_for_google_login(page: Page, timeout_ms: int = 600_000) -> None:
+async def wait_for_google_login(
+    page: Page,
+    timeout_ms: int = 180_000,
+    stop_flag: Optional[threading.Event] = None,
+) -> None:
     deadline = asyncio.get_event_loop().time() + timeout_ms / 1000.0
     while True:
+        if stop_flag is not None and stop_flag.is_set():
+            raise TypingStopped()
         if asyncio.get_event_loop().time() >= deadline:
-            raise TimeoutError("Не удалось дождаться входа в Google.")
+            raise TimeoutError(
+                "Не удалось дождаться входа в Google. "
+                "Откройте приложение, войдите через кнопку Login и попробуйте снова."
+            )
         if "docs.google.com" in page.url and "accounts.google.com" not in page.url:
             return
         await page.wait_for_timeout(1000)
@@ -267,6 +287,9 @@ async def run_google_docs_typing(
     max_delay_ms: int,
     close_browser: bool,
     type_text_fn=None,
+    stop_flag: Optional[threading.Event] = None,
+    login_wait_callback: Optional[Callable[[], None]] = None,
+    login_wait_timeout_s: int = 180,
 ) -> None:
     if not user_data_dir.exists():
         raise FileNotFoundError(f"Каталог профиля Chrome не найден: {user_data_dir}")
@@ -306,7 +329,16 @@ async def run_google_docs_typing(
 
             if "accounts.google.com" in page.url or "ServiceLogin" in page.url:
                 _log("Требуется ручной вход в Google. Ожидание авторизации...")
-                await wait_for_google_login(page)
+                if login_wait_callback is not None:
+                    try:
+                        login_wait_callback()
+                    except Exception:
+                        pass
+                await wait_for_google_login(
+                    page,
+                    timeout_ms=login_wait_timeout_s * 1000,
+                    stop_flag=stop_flag,
+                )
                 _log("Вход выполнен, продолжаем работу с документом.")
 
             try:
@@ -317,14 +349,18 @@ async def run_google_docs_typing(
 
             _log("Фокус установлен, начинаем печатать текст...")
             working = await get_input_frame(page)
-            if type_text_fn:
-                await type_text_fn(
-                    working, text, min_delay_ms, max_delay_ms
-                )
-            else:
-                await human_type_text(
-                    working, text, min_delay_ms, max_delay_ms
-                )
+            try:
+                if type_text_fn:
+                    await type_text_fn(
+                        working, text, min_delay_ms, max_delay_ms
+                    )
+                else:
+                    await human_type_text(
+                        working, text, min_delay_ms, max_delay_ms,
+                        stop_flag=stop_flag,
+                    )
+            except TypingStopped:
+                _log("Набор прерван пользователем.")
 
             _log("Набор текста завершён, финальная пауза...")
 

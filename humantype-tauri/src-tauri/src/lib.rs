@@ -1,9 +1,10 @@
 use once_cell::sync::OnceCell;
+use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Stdio;
-use tauri::Manager;
-use tokio::process::Child;
-use tokio::process::Command;
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 static TYPING_PROCESS: OnceCell<Mutex<Option<Child>>> = OnceCell::new();
@@ -36,6 +37,12 @@ fn get_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map_err(|e| e.to_string())
+}
+
+fn get_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = get_app_data_dir(app)?.join("logs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
 }
 
 fn chromium_subdir() -> &'static str {
@@ -76,8 +83,6 @@ fn locate_python_script(resources_root: &std::path::Path) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Корни, где искать директорию `chromium` после сборки ресурсов.
-/// Бывает `<resource>/chromium` или `<resource>/resources/chromium` после распаковки.
 fn chromium_parent_candidates(resources_root: &std::path::Path) -> Vec<PathBuf> {
     vec![
         resources_root.join("chromium"),
@@ -96,9 +101,6 @@ fn try_chromium_at_standard_layout(ch_home: &std::path::Path) -> Option<PathBuf>
     }
 }
 
-/// Playwright кладёт бинари в `<...>/chromium-<rev>/<chrome-*>`,
-/// локальная сборка могла завернуть только `chromium-1208` без верхнего `chrome-win64`
-/// или наоборот — как в CI (сразу `chrome-win64` внутри `chromium/`).
 fn try_chromium_via_playwright_nesting(ch_home: &std::path::Path) -> Option<PathBuf> {
     let subdir = chromium_subdir();
     let exe = chromium_exe_name();
@@ -133,7 +135,6 @@ fn locate_chromium_exe(resources_root: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
-/// Каталог, который передаётся в PLAYWRIGHT_BROWSERS_PATH: корень упакованного `chromium/`.
 fn chromium_bundle_home_for_exe(resources_root: &std::path::Path, chromium_exe: &std::path::Path) -> PathBuf {
     for cand in chromium_parent_candidates(resources_root) {
         if cand.is_dir() && chromium_exe.starts_with(&cand) {
@@ -141,6 +142,14 @@ fn chromium_bundle_home_for_exe(resources_root: &std::path::Path, chromium_exe: 
         }
     }
     resources_root.join("chromium")
+}
+
+fn append_log(log_dir: &std::path::Path, line: &str) {
+    use std::io::Write;
+    let path = log_dir.join("sidecar.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{}", line);
+    }
 }
 
 #[tauri::command]
@@ -189,15 +198,11 @@ async fn check_profile_exists(app: tauri::AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let entries = std::fs::read_dir(&profile_dir)
-        .map_err(|e| e.to_string())?;
-    for entry in entries {
-        if let Ok(entry) = entry {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
+    let mut entries = match std::fs::read_dir(&profile_dir) {
+        Ok(e) => e,
+        Err(e) => return Err(e.to_string()),
+    };
+    Ok(entries.next().is_some())
 }
 
 #[tauri::command]
@@ -217,6 +222,19 @@ async fn open_chromium_for_login(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Прибирает поле TYPING_PROCESS, если процесс уже завершился сам.
+/// Должно вызываться под удержанием guard.
+fn reap_if_dead(guard: &mut Option<Child>) {
+    if let Some(child) = guard.as_mut() {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                *guard = None;
+            }
+            _ => {}
+        }
+    }
+}
+
 #[tauri::command]
 async fn start_typing(
     app: tauri::AppHandle,
@@ -230,6 +248,7 @@ async fn start_typing(
     max_delay_ms: i32,
     close_browser: bool,
 ) -> Result<(), String> {
+    let _ = chrome_exe_path;
     if doc_url.trim().is_empty() {
         return Err("Ссылка на документ не может быть пустой".into());
     }
@@ -245,6 +264,7 @@ async fn start_typing(
     }
 
     let mut guard = typing_process().lock().await;
+    reap_if_dead(&mut guard);
     if guard.is_some() {
         return Err("Набор уже запущен".into());
     }
@@ -255,6 +275,7 @@ async fn start_typing(
 
     let resources = get_resources_dir(&app)?;
     let chromium_dir = chromium_bundle_home_for_exe(&resources, &chromium_exe_path);
+    let log_dir = get_log_dir(&app)?;
 
     let mut cmd_args: Vec<String> = Vec::new();
     cmd_args.push("--doc-url".into());
@@ -291,46 +312,169 @@ async fn start_typing(
         }
     }
 
-    eprintln!("[DEBUG] Python script: {}", python_script);
-    eprintln!("[DEBUG] Chromium: {}", chromium_path);
-    eprintln!("[DEBUG] Profile: {}", profile_path);
-    eprintln!("[DEBUG] PLAYWRIGHT_BROWSERS_PATH: {}", chromium_dir.display());
-    eprintln!("[DEBUG] Args: {}", cmd_args.join(" "));
+    append_log(
+        &log_dir,
+        &format!(
+            "[host] start_typing python={} chromium={} profile={} PWBP={} args={:?}",
+            python_script,
+            chromium_path,
+            profile_path,
+            chromium_dir.display(),
+            cmd_args
+        ),
+    );
 
-    let mut child = Command::new(&python_script);
-    child.env("PLAYWRIGHT_BROWSERS_PATH", &chromium_dir);
-    child.args(&cmd_args);
-    child.stdin(Stdio::piped());
-    child.stdout(Stdio::inherit());
-    child.stderr(Stdio::inherit());
+    let mut child_builder = Command::new(&python_script);
+    child_builder.env("PLAYWRIGHT_BROWSERS_PATH", &chromium_dir);
+    child_builder.env("PYTHONIOENCODING", "utf-8");
+    child_builder.env("HUMANTYPE_LOG_DIR", &log_dir);
+    child_builder.args(&cmd_args);
+    child_builder.stdin(Stdio::piped());
+    child_builder.stdout(Stdio::piped());
+    child_builder.stderr(Stdio::piped());
 
-    let spawned = child.spawn().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW — sidecar (console=True PyInstaller) иначе мигнёт окном.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        child_builder.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut spawned = child_builder.spawn().map_err(|e| {
+        let msg = format!("Не удалось запустить sidecar: {}", e);
+        append_log(&log_dir, &format!("[host] spawn failed: {}", msg));
+        msg
+    })?;
+
+    let stdout = spawned.stdout.take();
+    let stderr = spawned.stderr.take();
+
     *guard = Some(spawned);
+    drop(guard);
+
+    if let Some(stdout) = stdout {
+        let app_h = app.clone();
+        let log_dir_clone = log_dir.clone();
+        tauri::async_runtime::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        append_log(&log_dir_clone, &format!("[stdout] {}", line));
+                        forward_event(&app_h, &line);
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        append_log(&log_dir_clone, &format!("[stdout] read error: {}", e));
+                        break;
+                    }
+                }
+            }
+            // stdout закрылся → процесс на исходе. Завершаем сессию и эмитим terminated.
+            on_sidecar_exit(&app_h, &log_dir_clone).await;
+        });
+    }
+
+    if let Some(stderr) = stderr {
+        let log_dir_clone = log_dir.clone();
+        tauri::async_runtime::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                append_log(&log_dir_clone, &format!("[stderr] {}", line));
+            }
+        });
+    }
 
     Ok(())
 }
 
-#[tauri::command]
-async fn stop_typing() -> Result<(), String> {
-    use tokio::io::AsyncWriteExt;
-
-    let mut guard = typing_process().lock().await;
-    if let Some(child) = guard.as_mut() {
-        if let Some(stdin) = child.stdin.as_mut() {
-            let payload = r#"{"command":"stop"}"#;
-            stdin
-                .write_all(payload.as_bytes())
-                .await
-                .map_err(|e| e.to_string())?;
-            stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| e.to_string())?;
-            return Ok(());
+fn forward_event(app: &AppHandle, line: &str) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(value) => {
+            let event_name = value
+                .get("event")
+                .and_then(|v| v.as_str())
+                .unwrap_or("typing:raw")
+                .to_string();
+            let _ = app.emit(&format!("typing:{}", event_name), value);
+        }
+        Err(_) => {
+            let _ = app.emit("typing:raw", trimmed);
         }
     }
+}
 
-    Err("Процесс набора не запущен".into())
+async fn on_sidecar_exit(app: &AppHandle, log_dir: &std::path::Path) {
+    let mut guard = typing_process().lock().await;
+    let status_str: String = if let Some(child) = guard.as_mut() {
+        match child.wait().await {
+            Ok(status) => format!("{}", status),
+            Err(e) => format!("wait error: {}", e),
+        }
+    } else {
+        "no child".to_string()
+    };
+    *guard = None;
+    drop(guard);
+    append_log(log_dir, &format!("[host] sidecar exited: {}", status_str));
+    let _ = app.emit(
+        "typing:terminated",
+        serde_json::json!({ "status": status_str }),
+    );
+}
+
+#[tauri::command]
+async fn stop_typing(app: tauri::AppHandle) -> Result<(), String> {
+    let log_dir = get_log_dir(&app).ok();
+
+    let mut guard = typing_process().lock().await;
+    reap_if_dead(&mut guard);
+    let Some(child) = guard.as_mut() else {
+        return Err("Процесс набора не запущен".into());
+    };
+
+    // Сначала вежливо: stop-команда через stdin.
+    let graceful_ok = if let Some(stdin) = child.stdin.as_mut() {
+        let payload = b"{\"command\":\"stop\"}\n";
+        match stdin.write_all(payload).await {
+            Ok(_) => {
+                let _ = stdin.flush().await;
+                if let Some(ref dir) = log_dir {
+                    append_log(dir, "[host] stop_typing: sent stop via stdin");
+                }
+                true
+            }
+            Err(e) => {
+                if let Some(ref dir) = log_dir {
+                    append_log(dir, &format!("[host] stop_typing: stdin write failed: {}", e));
+                }
+                false
+            }
+        }
+    } else {
+        false
+    };
+
+    if graceful_ok {
+        return Ok(());
+    }
+
+    // Фолбэк: жёсткий kill, если stdin сломан.
+    match child.kill().await {
+        Ok(_) => {
+            if let Some(ref dir) = log_dir {
+                append_log(dir, "[host] stop_typing: killed child (stdin unavailable)");
+            }
+            Ok(())
+        }
+        Err(e) => Err(format!("Не удалось остановить процесс: {}", e)),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

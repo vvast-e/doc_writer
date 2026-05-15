@@ -2,7 +2,10 @@ name: Build Windows
 
 on:
   push:
-    branches: [feature/bundled-chromium-multi-page]
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:

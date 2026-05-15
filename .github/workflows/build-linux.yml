@@ -2,7 +2,10 @@ name: Build Linux
 
 on:
   push:
-    branches: [feature/bundled-chromium-multi-page]
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -74,6 +77,8 @@ jobs:
             CHROMIUM_SUBDIR=$(basename "$CHROMIUM_DIR")
             mkdir -p "humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR"
             cp -r "$CHROMIUM_DIR/"* "humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR/"
+            chmod +x "humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR/chrome" || true
+            chmod +x humantype-tauri/src-tauri/resources/python-script || true
             echo "Copied Chromium from $CHROMIUM_DIR to humantype-tauri/src-tauri/resources/chromium/$CHROMIUM_SUBDIR"
           else
             echo "Chromium not found!"

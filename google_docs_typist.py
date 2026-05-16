@@ -297,9 +297,6 @@ async def run_google_docs_typing(
             _log("Создаём persistent context Chromium/Chrome...")
             chrome_args = [
                 "--disable-blink-features=AutomationControlled",
-                "--remote-debugging-port=0",
-                "--disable-web-security",
-                "--disable-features=IsolateOrigins,site-per-process",
             ]
             context = await p.chromium.launch_persistent_context(
                 user_data_dir=str(user_data_dir),

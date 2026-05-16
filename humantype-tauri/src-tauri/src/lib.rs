@@ -77,7 +77,27 @@ fn python_script_candidates(resources_root: &std::path::Path) -> Vec<PathBuf> {
     ]
 }
 
+/// В debug-сборке предпочитаем исходник `main.py` из repo root —
+/// тогда правки в .py подхватываются без пересборки PyInstaller'ом.
+/// `resources_root` обычно `D:\doc_writer\humantype-tauri\src-tauri\resources`;
+/// repo root — это три уровня вверх.
+fn locate_dev_python_main(resources_root: &std::path::Path) -> Option<PathBuf> {
+    if !cfg!(debug_assertions) && std::env::var_os("HUMANTYPE_PYTHON_DEV").is_none() {
+        return None;
+    }
+    let repo_root = resources_root.parent()?.parent()?.parent()?;
+    let main_py = repo_root.join("main.py");
+    if main_py.is_file() {
+        Some(main_py)
+    } else {
+        None
+    }
+}
+
 fn locate_python_script(resources_root: &std::path::Path) -> Option<PathBuf> {
+    if let Some(dev) = locate_dev_python_main(resources_root) {
+        return Some(dev);
+    }
     python_script_candidates(resources_root)
         .into_iter()
         .find(|p| p.is_file())
@@ -358,21 +378,36 @@ async fn start_typing(
         ),
     );
 
-    let mut child_builder = Command::new(&python_script);
+    let is_py_source = std::path::Path::new(&python_script)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|e| e.eq_ignore_ascii_case("py"))
+        .unwrap_or(false);
+
+    let mut child_builder = if is_py_source {
+        // dev: запускаем исходник через интерпретатор. Используем `py -3` на Windows
+        // (PEP 397 launcher) с fallback на `python` — так не зависим от того,
+        // как именно у разработчика проброшен Python в PATH.
+        let py_launcher = if cfg!(windows) { "py" } else { "python3" };
+        let mut c = Command::new(py_launcher);
+        if cfg!(windows) {
+            c.arg("-3");
+        }
+        c.arg(&python_script);
+        c
+    } else {
+        Command::new(&python_script)
+    };
     child_builder.env("PLAYWRIGHT_BROWSERS_PATH", &chromium_dir);
     child_builder.env("PYTHONIOENCODING", "utf-8");
     child_builder.env("HUMANTYPE_LOG_DIR", &log_dir);
     child_builder.args(&cmd_args);
     child_builder.stdin(Stdio::piped());
     child_builder.stdout(Stdio::piped());
-    child_builder.stderr(Stdio::piped());
-
-    #[cfg(windows)]
-    {
-        // CREATE_NO_WINDOW — sidecar (console=True PyInstaller) иначе мигнёт окном.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        child_builder.creation_flags(CREATE_NO_WINDOW);
-    }
+    // stderr наследуем — пускай Python-логи (logger.info / traceback)
+    // видны в окне консоли sidecar'а: проще диагностировать зависания при наборе.
+    // Файловый лог по-прежнему ведёт сам sidecar в HUMANTYPE_LOG_DIR.
+    child_builder.stderr(Stdio::inherit());
 
     let mut spawned = child_builder.spawn().map_err(|e| {
         let msg = format!("Не удалось запустить sidecar: {}", e);
@@ -381,7 +416,6 @@ async fn start_typing(
     })?;
 
     let stdout = spawned.stdout.take();
-    let stderr = spawned.stderr.take();
 
     *guard = Some(spawned);
     drop(guard);
@@ -407,17 +441,6 @@ async fn start_typing(
             }
             // stdout закрылся → процесс на исходе. Завершаем сессию и эмитим terminated.
             on_sidecar_exit(&app_h, &log_dir_clone).await;
-        });
-    }
-
-    if let Some(stderr) = stderr {
-        let log_dir_clone = log_dir.clone();
-        tauri::async_runtime::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                append_log(&log_dir_clone, &format!("[stderr] {}", line));
-            }
         });
     }
 

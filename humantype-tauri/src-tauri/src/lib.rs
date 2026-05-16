@@ -13,10 +13,27 @@ fn typing_process() -> &'static Mutex<Option<Child>> {
     TYPING_PROCESS.get_or_init(|| Mutex::new(None))
 }
 
+/// На Windows `resource_dir()` возвращает extended-path вида `\\?\D:\...`.
+/// Этот префикс понятен Win32 API, но ломает sub-процессы, которые ходят через
+/// libc (например, Python: `py -3 \\?\D:\foo.py` → ошибка).
+/// Нормализуем для всего, что передаём дочерним процессам.
+fn strip_extended_prefix(p: &std::path::Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        // Может быть UNC: `\\?\UNC\server\share\...` → `\\server\share\...`
+        if let Some(unc) = rest.strip_prefix(r"UNC\") {
+            return PathBuf::from(format!(r"\\{}", unc));
+        }
+        return PathBuf::from(rest);
+    }
+    p.to_path_buf()
+}
+
 fn get_resources_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let resource_dir = app.path()
         .resource_dir()
         .map_err(|e| e.to_string())?;
+    let resource_dir = strip_extended_prefix(&resource_dir);
 
     let dev_resources = resource_dir
         .parent()
@@ -101,6 +118,37 @@ fn locate_python_script(resources_root: &std::path::Path) -> Option<PathBuf> {
     python_script_candidates(resources_root)
         .into_iter()
         .find(|p| p.is_file())
+}
+
+/// Ищет рабочий Python launcher: пробует `python` → `python3` → `py -3`.
+/// Возвращает (исполняемый файл, дополнительные ведущие args).
+fn find_python_launcher() -> Option<(&'static str, Vec<&'static str>)> {
+    let candidates: &[(&str, &[&str])] = &[
+        ("python", &[]),
+        ("python3", &[]),
+        ("py", &["-3"]),
+    ];
+    for (exe, leading) in candidates {
+        let mut cmd = std::process::Command::new(exe);
+        for a in *leading {
+            cmd.arg(a);
+        }
+        cmd.arg("--version");
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        if let Ok(st) = cmd.status() {
+            if st.success() {
+                return Some((exe, leading.iter().copied().collect()));
+            }
+        }
+    }
+    None
 }
 
 fn chromium_parent_candidates(resources_root: &std::path::Path) -> Vec<PathBuf> {
@@ -385,13 +433,17 @@ async fn start_typing(
         .unwrap_or(false);
 
     let mut child_builder = if is_py_source {
-        // dev: запускаем исходник через интерпретатор. Используем `py -3` на Windows
-        // (PEP 397 launcher) с fallback на `python` — так не зависим от того,
-        // как именно у разработчика проброшен Python в PATH.
-        let py_launcher = if cfg!(windows) { "py" } else { "python3" };
-        let mut c = Command::new(py_launcher);
-        if cfg!(windows) {
-            c.arg("-3");
+        let (launcher, extra_args) = find_python_launcher().ok_or_else(|| {
+            "Python 3 не найден в PATH. Установите Python 3.10+ или соберите python-script.exe."
+                .to_string()
+        })?;
+        append_log(
+            &log_dir,
+            &format!("[host] using Python launcher: {} {:?}", launcher, extra_args),
+        );
+        let mut c = Command::new(launcher);
+        for arg in extra_args {
+            c.arg(arg);
         }
         c.arg(&python_script);
         c
@@ -404,10 +456,7 @@ async fn start_typing(
     child_builder.args(&cmd_args);
     child_builder.stdin(Stdio::piped());
     child_builder.stdout(Stdio::piped());
-    // stderr наследуем — пускай Python-логи (logger.info / traceback)
-    // видны в окне консоли sidecar'а: проще диагностировать зависания при наборе.
-    // Файловый лог по-прежнему ведёт сам sidecar в HUMANTYPE_LOG_DIR.
-    child_builder.stderr(Stdio::inherit());
+    child_builder.stderr(Stdio::piped());
 
     let mut spawned = child_builder.spawn().map_err(|e| {
         let msg = format!("Не удалось запустить sidecar: {}", e);
@@ -416,9 +465,23 @@ async fn start_typing(
     })?;
 
     let stdout = spawned.stdout.take();
+    let stderr = spawned.stderr.take();
 
     *guard = Some(spawned);
     drop(guard);
+
+    if let Some(stderr) = stderr {
+        let log_dir_clone = log_dir.clone();
+        tauri::async_runtime::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                // В файл — всегда, в stderr процесса — для видимости в dev-консоли.
+                append_log(&log_dir_clone, &format!("[stderr] {}", line));
+                eprintln!("[sidecar] {}", line);
+            }
+        });
+    }
 
     if let Some(stdout) = stdout {
         let app_h = app.clone();

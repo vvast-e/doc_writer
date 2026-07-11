@@ -44,11 +44,20 @@ interface ErrorPayload {
 export function useTyping() {
   const [isTyping, setIsTyping] = useState(false);
   const [progress, setProgress] = useState<number>(0);
+  const [typed, setTyped] = useState<number>(0);
+  const [total, setTotal] = useState<number>(0);
+  const [etaRemainingSec, setEtaRemainingSec] = useState<number | null>(null);
   const [status, setStatus] = useState<TypingStatus>({
     type: "idle",
     message: "Готово",
   });
   const sidecarErroredRef = useRef(false);
+  // Якорь для измерения реального темпа: фиксируется на первом реальном
+  // прогрессе (а не на "started"), чтобы не ловить стартовую паузу браузера.
+  const firstProgressRef = useRef<{ at: number; typed: number } | null>(null);
+  // p50 из Monte-Carlo оценки (сек), посчитанной до старта — используется как
+  // якорь ETA, пока не накопилось достаточно реальных данных о темпе.
+  const mcP50Ref = useRef<number | null>(null);
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -57,23 +66,54 @@ export function useTyping() {
       unlisteners.push(
         await listen<ProgressPayload>("typing:progress", (event) => {
           const p = event.payload?.progress ?? 0;
+          const typedNow = event.payload?.typed ?? 0;
+          const totalNow = event.payload?.total ?? 0;
           setProgress(p);
-          const typed = event.payload?.typed ?? 0;
-          const total = event.payload?.total ?? 0;
-          setStatus({
-            type: "running",
-            message:
-              total > 0
-                ? `Набираю: ${typed}/${total} (${Math.round(p * 100)}%)`
-                : "Идёт набор...",
-          });
+          setTyped(typedNow);
+          setTotal(totalNow);
+
+          if (!firstProgressRef.current && typedNow > 0) {
+            firstProgressRef.current = { at: Date.now(), typed: typedNow };
+          }
+
+          let liveRemaining: number | null = null;
+          const baseline = firstProgressRef.current;
+          if (baseline && totalNow > typedNow) {
+            const deltaTyped = typedNow - baseline.typed;
+            const elapsedSec = (Date.now() - baseline.at) / 1000;
+            if (deltaTyped > 0 && elapsedSec > 0) {
+              const rate = deltaTyped / elapsedSec;
+              liveRemaining = rate > 0 ? (totalNow - typedNow) / rate : null;
+            }
+          }
+
+          const mcP50 = mcP50Ref.current;
+          const mcRemaining =
+            mcP50 !== null && p < 1 ? mcP50 * (1 - p) : null;
+
+          let blended: number | null;
+          if (liveRemaining !== null && mcRemaining !== null) {
+            // В начале доверяем Monte-Carlo (мало реальных данных о темпе),
+            // после ~20% прогресса переходим на измеренный темп.
+            const w = Math.min(1, p / 0.2);
+            blended = w * liveRemaining + (1 - w) * mcRemaining;
+          } else {
+            blended = liveRemaining ?? mcRemaining;
+          }
+          setEtaRemainingSec(blended);
+
+          setStatus({ type: "running", message: "Идёт набор..." });
         }),
       );
 
       unlisteners.push(
-        await listen("typing:started", () => {
+        await listen<{ total?: number }>("typing:started", (event) => {
           sidecarErroredRef.current = false;
           setProgress(0);
+          setTyped(0);
+          setTotal(event.payload?.total ?? 0);
+          setEtaRemainingSec(null);
+          firstProgressRef.current = null;
           setStatus({ type: "running", message: "Браузер запускается..." });
         }),
       );
@@ -91,6 +131,7 @@ export function useTyping() {
         await listen("typing:done", () => {
           setStatus({ type: "success", message: "Готово" });
           setIsTyping(false);
+          setEtaRemainingSec(null);
         }),
       );
 
@@ -98,6 +139,7 @@ export function useTyping() {
         await listen("typing:stopped", () => {
           setStatus({ type: "idle", message: "Остановлено" });
           setIsTyping(false);
+          setEtaRemainingSec(null);
         }),
       );
 
@@ -140,9 +182,17 @@ export function useTyping() {
     };
   }, []);
 
-  const startTyping = async (values: TypingFormValues) => {
+  const startTyping = async (
+    values: TypingFormValues,
+    mcP50Sec?: number | null,
+  ) => {
     setIsTyping(true);
     setProgress(0);
+    setTyped(0);
+    setTotal(0);
+    setEtaRemainingSec(null);
+    firstProgressRef.current = null;
+    mcP50Ref.current = mcP50Sec ?? null;
     sidecarErroredRef.current = false;
     setStatus({ type: "running", message: "Запускаю..." });
 
@@ -181,6 +231,9 @@ export function useTyping() {
     isTyping,
     status,
     progress,
+    typed,
+    total,
+    etaRemainingSec,
     startTyping,
     stopTyping,
   };

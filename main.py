@@ -19,7 +19,12 @@ for stream_name in ("stdin", "stdout", "stderr"):
         except Exception:
             pass
 
-from google_docs_typist import load_text, run_google_docs_typing, human_type_text
+from google_docs_typist import (
+    load_text,
+    run_google_docs_typing,
+    human_type_text,
+    estimate_typing_seconds,
+)
 
 
 def _resolve_log_dir() -> Path:
@@ -72,18 +77,28 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--session-id", required=False, help="ID сессии для sidecar режима")
-    parser.add_argument("--doc-url", required=True, help="Ссылка на документ Google Docs.")
+    parser.add_argument("--doc-url", default=None, help="Ссылка на документ Google Docs.")
     text_group = parser.add_mutually_exclusive_group(required=True)
     text_group.add_argument("--text-file", help="Путь к текстовому файлу UTF-8 с текстом для ввода.")
     text_group.add_argument("--text-content", help="Текст для ввода напрямую.")
-    parser.add_argument("--user-data-dir", required=True, help="Путь к директории профиля Chrome.")
+    parser.add_argument("--user-data-dir", default=None, help="Путь к директории профиля Chrome.")
     parser.add_argument("--chrome-exe-path", default=None, help="Путь к chrome.exe, опционально.")
     parser.add_argument("--min-delay", type=int, default=110, help="Минимальная задержка (мс).")
     parser.add_argument("--max-delay", type=int, default=380, help="Максимальная задержка (мс).")
     parser.add_argument("--login-wait-timeout", type=int, default=180,
                         help="Сколько секунд ждать ручной вход в Google (по умолчанию 180).")
     parser.add_argument("--close-browser", action="store_true", help="Закрыть браузер после завершения.")
-    return parser.parse_args()
+    parser.add_argument("--estimate-only", action="store_true",
+                        help="Не открывать браузер: посчитать Monte-Carlo оценку времени набора и выйти.")
+    parser.add_argument("--seeds", type=int, default=24,
+                        help="Число сидов Monte-Carlo для --estimate-only (по умолчанию 24).")
+    args = parser.parse_args()
+    if not args.estimate_only:
+        if not args.doc_url or not args.doc_url.strip():
+            parser.error("--doc-url обязателен, если не указан --estimate-only")
+        if not args.user_data_dir or not args.user_data_dir.strip():
+            parser.error("--user-data-dir обязателен, если не указан --estimate-only")
+    return args
 
 
 # Кросс-поточный флаг останова (управляется stdin-командой `stop`).
@@ -183,17 +198,40 @@ def main() -> None:
             pass
 
     args = parse_args()
+    if args.text_content:
+        text = args.text_content
+    else:
+        text_file = Path(args.text_file)
+        text = load_text(text_file)
+
+    if args.estimate_only:
+        async def _run_estimate() -> None:
+            totals = await estimate_typing_seconds(
+                text, args.min_delay, args.max_delay, seeds=args.seeds,
+            )
+            totals_sorted = sorted(totals)
+
+            def pct(p: float) -> float:
+                idx = min(len(totals_sorted) - 1, round(p * (len(totals_sorted) - 1)))
+                return totals_sorted[idx]
+
+            _emit({
+                "event": "estimate",
+                "p10": pct(0.10),
+                "p50": pct(0.50),
+                "p90": pct(0.90),
+                "seeds": args.seeds,
+            })
+
+        asyncio.run(_run_estimate())
+        return
+
     session_id = args.session_id or "default"
     doc_url = args.doc_url
     user_data_dir = Path(args.user_data_dir)
     chrome_exe_path: Optional[Path] = (
         Path(args.chrome_exe_path) if args.chrome_exe_path else None
     )
-    if args.text_content:
-        text = args.text_content
-    else:
-        text_file = Path(args.text_file)
-        text = load_text(text_file)
 
     logger.info(
         "Sidecar старт: session=%s url=%s chars=%d delays=%d..%d profile=%s",

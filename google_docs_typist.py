@@ -88,25 +88,133 @@ async def paragraph_micro_navigation(page: Page) -> None:
     await asyncio.sleep(random.uniform(0.18, 0.45))
 
 
+async def _kix_cursor_position(page: Page) -> Optional[tuple]:
+    """Координаты мигающего курсора Google Docs (.kix-cursor), если он есть.
+
+    Используется не как факт "фокус есть" (DOM-эвристики типа activeElement
+    или наличия .kix-cursor-blink оказались истинны ЕЩЁ ДО реального фокуса —
+    проверено вживую), а как способ поведенчески убедиться, что тестовый
+    символ реально дошёл до документа: если курсор сдвинулся после печати —
+    ввод действительно попал в текст.
+    """
+    try:
+        pos = await page.evaluate(
+            """
+            () => {
+                const el = document.querySelector('.kix-cursor');
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                return [r.left, r.top];
+            }
+            """
+        )
+        return tuple(pos) if pos else None
+    except Exception:
+        return None
+
+
 async def focus_document_body(page: Page) -> None:
-    """Надёжный фокус"""
-    strategies = [
+    """Надёжный фокус на документе Google Docs.
+
+    ВАЖНО (найдено живой диагностикой): `element.click(position=...)` у
+    Playwright может зависать на ~30с и падать по таймауту, потому что клик в
+    верхней части страницы перехватывается плавающими UI-подсказками, которые
+    Google Docs рисует поверх canvas для пустых/новых документов ("Заметки к
+    встрече" и т.п.) — Playwright обнаруживает перехват через свою
+    actionability-проверку и бесконечно ретраит клик. Поэтому кликаем ТОЛЬКО
+    через `page.mouse.click()` по вычисленным координатам (сырой клик без
+    проверки перехвата) и заметно ниже верхнего края страницы.
+
+    Также сам факт "клик прошёл" не значит, что фокус реально встал — DOM-
+    признаки (activeElement, .kix-cursor-blink) оказались истинны ещё до
+    реального ввода. Поэтому подтверждаем поведенчески: печатаем тестовый
+    символ и проверяем, что курсор (.kix-cursor) реально сдвинулся.
+
+    Не действует против облегчённых fake-page объектов офлайн-симуляции
+    (tools/calibrate_cadence.py, estimate_typing_seconds) — у них нет
+    wait_for_selector, и реальная проверка фокуса там неприменима и не нужна.
+    """
+    if not hasattr(page, "wait_for_selector"):
+        return
+
+    try:
+        await page.wait_for_selector("#docs-editor-container", timeout=30000)
+    except Exception:
+        _log("Редактор Google Docs не дождался готовности (#docs-editor-container) — пробуем клик всё равно")
+
+    click_targets = [
         "canvas.kix-canvas-tile-content",
         "div.kix-page-paginated",
-        "div[role='textbox']",
+    ]
+
+    attempts = 5
+    for attempt in range(attempts):
+        for sel in click_targets:
+            try:
+                el = await page.wait_for_selector(sel, timeout=5000)
+                box = await el.bounding_box()
+            except Exception:
+                continue
+            if not box:
+                continue
+
+            # Целимся заметно ниже верха страницы — там, где Google Docs
+            # рисует плавающие подсказки для пустых документов.
+            abs_x = box["x"] + min(150, box["width"] * 0.2)
+            abs_y = box["y"] + min(350, box["height"] * 0.3)
+
+            pos_before = await _kix_cursor_position(page)
+            await page.mouse.click(abs_x, abs_y)
+            await page.wait_for_timeout(300)
+
+            # Поведенческий тест: печатаем один символ и проверяем, что
+            # курсор реально сдвинулся, затем сразу откатываем.
+            await page.keyboard.type("?", delay=30)
+            await page.wait_for_timeout(200)
+            pos_after = await _kix_cursor_position(page)
+            await page.keyboard.press("Backspace")
+
+            if pos_after is not None and pos_after != pos_before:
+                _log(f"Фокус подтверждён через {sel} (попытка {attempt + 1})")
+                return
+
+        await page.wait_for_timeout(500)
+
+    diagnostics = await _probe_focus_candidates(page)
+    _log(
+        "ПРЕДУПРЕЖДЕНИЕ: фокус документа не подтверждён после всех попыток — "
+        f"печать может не попасть в документ. Диагностика DOM: {diagnostics}"
+    )
+
+
+async def _probe_focus_candidates(page: Page) -> dict:
+    """Диагностика на случай очередного сдвига вёрстки Google Docs: какие из
+    известных селекторов реально присутствуют в DOM на момент отказа фокуса."""
+    selectors = [
+        "#docs-editor-container",
+        "#docs-editor",
+        "canvas.kix-canvas-tile-content",
+        "div.kix-page-paginated",
+        ".kix-appview-editor",
+        "iframe.docs-texteventtarget-iframe",
         ".kix-cursor",
     ]
-    for sel in strategies:
-        try:
-            el = await page.wait_for_selector(sel, timeout=5000)
-            await el.click(position={"x": 150, "y": 80})
-            await page.wait_for_timeout(1500)
-            _log(f"Фокус получен через {sel}")
-            return
-        except Exception:
-            continue
-    await page.mouse.click(700, 400)
-    _log("Использован ультра-fallback фокус")
+    try:
+        return await page.evaluate(
+            """
+            (selectors) => {
+                const out = {};
+                for (const sel of selectors) {
+                    try { out[sel] = document.querySelectorAll(sel).length; }
+                    catch (e) { out[sel] = 'ERR'; }
+                }
+                return out;
+            }
+            """,
+            selectors,
+        )
+    except Exception:
+        return {}
 
 
 async def _add_pause_after_char(ch: str) -> None:
@@ -114,6 +222,76 @@ async def _add_pause_after_char(ch: str) -> None:
         await asyncio.sleep(float(np.random.uniform(6.8, 15.2)))
     elif ch in PAUSE_CHARS:
         await asyncio.sleep(float(np.random.uniform(1.0, 3.05)))
+
+
+async def _retype_char(page: Page, ch: str) -> None:
+    """Заново отправляет ровно один символ (без учёта каденса — это аварийный
+    повтор, а не часть модели человеческого набора)."""
+    if ch == "\n":
+        await page.keyboard.press("Enter")
+    elif ch == "\b":
+        await page.keyboard.press("Backspace")
+    else:
+        await page.keyboard.type(ch, delay=30)
+
+
+async def _verify_char_landed(page: Page, last_pos: Optional[tuple], ch: str) -> Optional[tuple]:
+    """Проверка ПОСЛЕ КАЖДОГО символа: реально ли он долетел до документа.
+
+    Живой диагностикой подтверждено: Google Docs проводит фоновую ротацию
+    сессионных cookie (навигация accounts.google.com/RotateCookiesPage) в
+    первые секунды после открытия документа — это совпадает с моментом,
+    когда human_type_text начинает печатать после стартовой паузы, и
+    сбрасывает установленный фокус: символы перестают попадать в документ, а
+    progress_callback (считающий отправленные keyboard.type()-вызовы, не то,
+    что реально долетело до DOM) этого не замечает и продолжает рапортовать
+    100%. Проверка только раз в N символов оставляла целое окно потерянных
+    символов без возможности понять, сколько именно из них долетело — поэтому
+    проверяем после каждого: максимум теряется/дублируется 0-1 символ, а не
+    целый чанк.
+
+    Короткая пауза перед чтением позиции курсора — дать рендеру устаканиться,
+    иначе можно прочитать ещё не обновившуюся позицию и ложно посчитать
+    успешно долетевший символ пропавшим (и продублировать его).
+
+    Восстановление кликает ТОЧНО по последней известной позиции курсора (а не
+    через focus_document_body — та кликает по фиксированному смещению внутри
+    canvas, рассчитанному для самого начала документа; вызванная посреди
+    набора, она увела бы точку ввода назад, в верх страницы — именно так и
+    проявлялся баг при живой проверке).
+
+    Settle-пауза (asyncio.sleep, не page.wait_for_timeout) намеренно учитывается
+    виртуальными часами офлайн-симуляции (tools/calibrate_cadence.py,
+    estimate_typing_seconds) — это систематическая добавка на КАЖДЫЙ символ,
+    и её сокрытие от Monte-Carlo оценки времени воспроизвело бы ту же
+    недооценку ETA, которую чинили в Фазе 2. Сама же DOM-проверка/восстановление
+    неприменимы к облегчённым fake-page объектам симуляции (нет
+    wait_for_selector) — та часть у них просто не выполняется.
+    """
+    await asyncio.sleep(0.06)
+
+    if not hasattr(page, "wait_for_selector"):
+        return last_pos
+
+    current_pos = await _kix_cursor_position(page)
+    if current_pos is not None and current_pos != last_pos:
+        return current_pos
+
+    click_pos = current_pos or last_pos
+    if click_pos is None:
+        # Ещё ни разу не видели курсор на экране — некуда точно кликнуть,
+        # только тогда используем общий focus_document_body (старт документа).
+        _log("ПРЕДУПРЕЖДЕНИЕ: фокус потерян и позиция курсора неизвестна — переустанавливаю фокус с нуля")
+        await focus_document_body(page)
+        return await _kix_cursor_position(page)
+
+    _log(f"ПРЕДУПРЕЖДЕНИЕ: символ не долетел до документа — восстанавливаю фокус в позиции курсора {click_pos} и повторяю ввод")
+    x, y = click_pos
+    await page.mouse.click(x + 2, y + 8)
+    await page.wait_for_timeout(200)
+    await _retype_char(page, ch)
+    await page.wait_for_timeout(60)
+    return await _kix_cursor_position(page)
 
 
 async def human_type_text(
@@ -151,6 +329,17 @@ async def human_type_text(
 
     await page.wait_for_timeout(random.randint(2800, 3600))
 
+    # Именно тут (сразу после стартовой паузы) живая диагностика поймала
+    # коллизию с фоновой ротацией сессионных cookie Google Docs — повторно
+    # подтверждаем фокус перед началом печати.
+    await focus_document_body(page)
+
+    last_char_pos = await _kix_cursor_position(page)
+
+    async def verify_last_char(ch: str) -> None:
+        nonlocal last_char_pos
+        last_char_pos = await _verify_char_landed(page, last_char_pos, ch)
+
     words = re.split(r"(\s+)", text)
     for segment in words:
         if segment == "":
@@ -167,6 +356,7 @@ async def human_type_text(
                 await page.keyboard.press("Enter")
                 typed += 1
                 report_progress()
+                await verify_last_char(ch)
                 await asyncio.sleep(random.uniform(0.14, 0.52) * wm)
                 await _add_pause_after_char(ch)
                 prev_ch_global = "\n"
@@ -186,6 +376,7 @@ async def human_type_text(
                 await page.keyboard.press("Backspace")
                 typed += 1
                 report_progress()
+                await verify_last_char(ch)
                 prev_ch_global = "\b"
                 await asyncio.sleep(
                     random.uniform(0.11, 0.34) * wm,
@@ -201,6 +392,7 @@ async def human_type_text(
             await page.keyboard.type(ch, delay=max(1.0, press_ms))
             typed += 1
             report_progress()
+            await verify_last_char(ch)
 
             burst_left -= 1
             if burst_left <= 0:
@@ -233,6 +425,62 @@ async def human_type_text(
 
     await page.wait_for_timeout(random.randint(2400, 3200))
     _log("✅ Набор завершён")
+
+
+async def estimate_typing_seconds(
+    text: str,
+    min_delay_ms: int,
+    max_delay_ms: int,
+    seeds: int = 24,
+) -> list[float]:
+    """Monte-Carlo оценка длительности набора: реальный human_type_text
+    поверх виртуальных часов (без браузера, без реального sleep)."""
+
+    class _FakeKeyboard:
+        def __init__(self, state: dict) -> None:
+            self.state = state
+
+        async def press(self, key: str) -> None:
+            return None
+
+        async def type(self, ch: str, delay: float = 0.0) -> None:
+            self.state["total"] += delay / 1000.0
+
+    class _FakeMouse:
+        async def move(self, x, y, steps=1) -> None:
+            return None
+
+        async def click(self, x, y) -> None:
+            return None
+
+    class _FakePage:
+        def __init__(self, state: dict) -> None:
+            self.keyboard = _FakeKeyboard(state)
+            self.mouse = _FakeMouse()
+
+        async def wait_for_timeout(self, ms: int) -> None:
+            return None
+
+    orig_sleep = asyncio.sleep
+    totals: list[float] = []
+    try:
+        for seed in range(max(1, seeds)):
+            state = {"total": 0.0}
+
+            async def fake_sleep(seconds: float, result=None, _state=state):
+                _state["total"] += seconds
+                return result
+
+            random.seed(seed)
+            np.random.seed(seed)
+            asyncio.sleep = fake_sleep
+            page = _FakePage(state)
+            await human_type_text(page, text, min_delay_ms, max_delay_ms)
+            totals.append(state["total"])
+    finally:
+        asyncio.sleep = orig_sleep
+
+    return totals
 
 
 async def ensure_page(context: BrowserContext) -> Page:

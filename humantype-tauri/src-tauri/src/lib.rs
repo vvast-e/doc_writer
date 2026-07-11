@@ -549,6 +549,83 @@ async fn on_sidecar_exit(app: &AppHandle, log_dir: &std::path::Path) {
     );
 }
 
+#[derive(serde::Serialize)]
+struct EstimateResult {
+    p10: f64,
+    p50: f64,
+    p90: f64,
+}
+
+#[tauri::command]
+async fn estimate_typing_time(
+    app: tauri::AppHandle,
+    text: String,
+    min_delay_ms: i32,
+    max_delay_ms: i32,
+) -> Result<EstimateResult, String> {
+    if text.trim().is_empty() {
+        return Err("Пустой текст".into());
+    }
+
+    let python_script = find_python_script(app.clone()).await?;
+
+    let is_py_source = std::path::Path::new(&python_script)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|e| e.eq_ignore_ascii_case("py"))
+        .unwrap_or(false);
+
+    let mut child_builder = if is_py_source {
+        let (launcher, extra_args) = find_python_launcher().ok_or_else(|| {
+            "Python 3 не найден в PATH. Установите Python 3.10+ или соберите python-script.exe."
+                .to_string()
+        })?;
+        let mut c = Command::new(launcher);
+        for arg in extra_args {
+            c.arg(arg);
+        }
+        c.arg(&python_script);
+        c
+    } else {
+        Command::new(&python_script)
+    };
+    child_builder.env("PYTHONIOENCODING", "utf-8");
+    child_builder.arg("--estimate-only");
+    child_builder.arg("--text-content").arg(&text);
+    child_builder.arg("--min-delay").arg(min_delay_ms.to_string());
+    child_builder.arg("--max-delay").arg(max_delay_ms.to_string());
+    child_builder.stdin(Stdio::null());
+    child_builder.stdout(Stdio::piped());
+    child_builder.stderr(Stdio::null());
+
+    let child = child_builder
+        .spawn()
+        .map_err(|e| format!("Не удалось запустить оценку: {}", e))?;
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(20), child.wait_with_output())
+        .await
+        .map_err(|_| "Таймаут расчёта оценки времени".to_string())?
+        .map_err(|e| format!("Ошибка ожидания процесса оценки: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+            if value.get("event").and_then(|v| v.as_str()) == Some("estimate") {
+                let p10 = value.get("p10").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let p50 = value.get("p50").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let p90 = value.get("p90").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                return Ok(EstimateResult { p10, p50, p90 });
+            }
+        }
+    }
+
+    Err("Не удалось получить оценку времени от sidecar".into())
+}
+
 #[tauri::command]
 async fn stop_typing(app: tauri::AppHandle) -> Result<(), String> {
     let log_dir = get_log_dir(&app).ok();
@@ -605,6 +682,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_typing,
             stop_typing,
+            estimate_typing_time,
             find_chromium,
             find_python_script,
             get_profile_path,

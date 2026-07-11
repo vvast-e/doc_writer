@@ -1,0 +1,141 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Hello {
+  id      Int    @id @default(autoincrement())
+  message String
+}
+
+model User {
+  id              String   @id @default(uuid())
+  name            String?
+  email           String?  @unique
+  last_logined_at DateTime?
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  payment_provider  String? // yookassa, yoomoney, ...
+  payment_method_id String? // payment_method.id от ЮKassa
+  payment_mask      String? // "VISA ****1234" и т.п.
+
+  oauthAccounts   UserOAuthAccount[]
+  subscriptions   UserSubscription[]
+  transactions    Transaction[]
+  devices         Device[]
+  deviceKeyAudits DeviceKeyAudit[]
+}
+
+model UserOAuthAccount {
+  id            String   @id @default(uuid())
+  user_id       String
+  provider      String
+  external_id   String
+  refresh_token String?
+  expires_at    DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, provider])
+
+  @@index([provider, external_id])
+}
+
+model Subscription {
+  id          Int      @id
+  name        String
+  price       Decimal
+  currency    String   @default("RUB")
+  period      Int      @default(1) // 1, 12, 6
+  max_devices Int
+  is_active   Boolean  @default(true)
+  sort_order  Int      @default(100)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  userSubscriptions UserSubscription[]
+  transactions      Transaction[]
+}
+
+model UserSubscription {
+  id              String   @id @default(uuid())
+  user_id         String
+  subscription_id Int
+  started_at      DateTime
+  expires_at      DateTime
+  is_active       Boolean  @default(true)
+  auto_renew      Boolean  @default(false)
+  cancelled_at    DateTime?
+  cancel_reason   String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  user         User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  subscription Subscription @relation(fields: [subscription_id], references: [id])
+
+  @@index([user_id])
+  // Максимум одна активная подписка на пользователя обеспечивается
+  // partial unique индексом (user_id) WHERE is_active, добавленным raw-SQL миграцией.
+}
+
+model Transaction {
+  id               String   @id @default(uuid()) // Idempotence-Key
+  user_id          String
+  subscription_id  Int?
+  amount           Decimal
+  currency         String   @default("RUB")
+  status           String   // точно нужны: pending, success, failed, ? refunded
+  provider         String?  // yookassa, ...
+  provider_tx_id   String?  // payment.id в ЮKassa
+  provider_payload Json?
+  created_at       DateTime @default(now())
+  paid_at          DateTime?
+  updated_at       DateTime @updatedAt
+
+  user         User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscription_id], references: [id])
+
+  // Дубли платежей ловятся partial unique индексом (provider, provider_tx_id)
+  // WHERE provider_tx_id IS NOT NULL, добавленным raw-SQL миграцией
+  // (обычный @@unique в Postgres не сработал бы: NULL считаются различными).
+
+  @@index([user_id])
+}
+
+model Device {
+  id           String   @id @default(uuid())
+  user_id      String
+  data         Json?
+  key          String   @unique
+  is_active    Boolean  @default(true)
+  activated_at DateTime
+  last_seen_at DateTime?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  user           User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  deviceKeyAudit DeviceKeyAudit[]
+
+  @@index([user_id])
+}
+
+model DeviceKeyAudit {
+  id         String   @id @default(uuid())
+  device_id  String?
+  user_id    String?
+  key        String
+  action     String   // issued, verified, revoked, reset_all
+  created_at DateTime @default(now())
+
+  device Device? @relation(fields: [device_id], references: [id])
+  user   User?   @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+}

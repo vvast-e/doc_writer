@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Card,
@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 import { motion } from "framer-motion";
 
 import { TextSourceSelector } from "@/components/features/TextSourceSelector";
@@ -64,37 +65,83 @@ export function TypingForm() {
 
   const { pick: pickTextFile } = useFilePicker("file");
 
-  const { isTyping, status, startTyping, stopTyping } = useTyping();
+  const {
+    isTyping,
+    status,
+    progress,
+    typed,
+    total,
+    etaRemainingSec,
+    startTyping,
+    stopTyping,
+  } = useTyping();
 
   const isValid = useMemo(
     () => typingFormSchema.safeParse(values).success,
     [values],
   );
 
-  const estimatedTime = useMemo(() => {
-    const text =
-      values.textSource === "manual"
-        ? values.manualText ?? ""
-        : "";
+  const manualText =
+    values.textSource === "manual" ? values.manualText ?? "" : "";
 
-    if (!text) return null;
+  // Грубая мгновенная прикидка (без idle-пауз и множителей) — показывается,
+  // пока не пришла точная Monte-Carlo оценка от sidecar.
+  const roughEstimateSec = useMemo(() => {
+    if (!manualText) return null;
 
     const avgDelay = (values.minDelayMs + values.maxDelayMs) / 2;
-
-    const pauseChars = text.match(/[.!?,;:)]/g)?.length ?? 0;
+    const pauseChars = manualText.match(/[.!?,;:)]/g)?.length ?? 0;
     const pauseTime = pauseChars * 2000;
-
-    const newlines = text.match(/\n/g)?.length ?? 0;
+    const newlines = manualText.match(/\n/g)?.length ?? 0;
     const newlineTime = newlines * 11000;
+    const charTime = manualText.length * avgDelay;
 
-    const totalChars = text.length;
-    const charTime = totalChars * avgDelay;
+    return Math.round((charTime + pauseTime + newlineTime) / 1000);
+  }, [manualText, values.minDelayMs, values.maxDelayMs]);
 
-    const totalMs = charTime + pauseTime + newlineTime;
-    const totalSec = Math.round(totalMs / 1000);
+  const [preciseEstimate, setPreciseEstimate] = useState<
+    { p10: number; p50: number; p90: number } | null
+  >(null);
+  const [isEstimating, setIsEstimating] = useState(false);
+  const estimateRequestIdRef = useRef(0);
 
-    return totalSec;
-  }, [values.textSource, values.manualText, values.minDelayMs, values.maxDelayMs]);
+  useEffect(() => {
+    if (!manualText) {
+      setPreciseEstimate(null);
+      setIsEstimating(false);
+      return;
+    }
+
+    setIsEstimating(true);
+    const requestId = ++estimateRequestIdRef.current;
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await invoke<{ p10: number; p50: number; p90: number }>(
+          "estimate_typing_time",
+          {
+            text: manualText,
+            minDelayMs: values.minDelayMs,
+            maxDelayMs: values.maxDelayMs,
+          },
+        );
+        if (estimateRequestIdRef.current === requestId) {
+          setPreciseEstimate(result);
+        }
+      } catch (e) {
+        console.error("estimate_typing_time failed:", e);
+      } finally {
+        if (estimateRequestIdRef.current === requestId) {
+          setIsEstimating(false);
+        }
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [manualText, values.minDelayMs, values.maxDelayMs]);
+
+  const formatMinSec = (totalSec: number) =>
+    `${Math.floor(totalSec / 60)} мин ${Math.round(totalSec % 60)} сек`;
 
   const updateField = <K extends keyof TypingFormValues>(
     key: K,
@@ -124,7 +171,7 @@ export function TypingForm() {
 
   const handleStart = async () => {
     if (!validate()) return;
-    await startTyping(values);
+    await startTyping(values, preciseEstimate?.p50 ?? null);
   };
 
   const handleStop = async () => {
@@ -252,15 +299,45 @@ export function TypingForm() {
                 </p>
               )}
 
-              {estimatedTime !== null && (
-                <div className="rounded-lg bg-muted/50 p-4">
-                  <p className="text-sm text-muted-foreground">
-                    Примерное время:{" "}
-                    <span className="font-semibold text-foreground">
-                      {Math.floor(estimatedTime / 60)} мин {estimatedTime % 60} сек
+              {isTyping ? (
+                <div className="space-y-2 rounded-lg border border-border bg-muted/50 p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      {total > 0
+                        ? `Набрано: ${typed}/${total} символов`
+                        : "Идёт набор..."}
                     </span>
-                  </p>
+                    <span className="font-semibold text-foreground">
+                      {Math.round(progress * 100)}%
+                    </span>
+                  </div>
+                  <Progress value={progress * 100} />
+                  {etaRemainingSec !== null && (
+                    <p className="text-xs text-muted-foreground/80">
+                      Осталось ≈ {formatMinSec(etaRemainingSec)}
+                    </p>
+                  )}
                 </div>
+              ) : (
+                (preciseEstimate || roughEstimateSec !== null) && (
+                  <div className="rounded-lg bg-muted/50 p-4">
+                    <p className="text-sm text-muted-foreground">
+                      Примерное время:{" "}
+                      <span className="font-semibold text-foreground">
+                        {preciseEstimate
+                          ? `${formatMinSec(preciseEstimate.p10)} – ${formatMinSec(preciseEstimate.p90)}`
+                          : roughEstimateSec !== null
+                            ? `≈ ${formatMinSec(roughEstimateSec)}`
+                            : null}
+                      </span>
+                      {isEstimating && (
+                        <span className="ml-2 text-xs text-muted-foreground/60">
+                          (уточняю...)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )
               )}
             </div>
 

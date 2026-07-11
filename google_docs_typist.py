@@ -144,7 +144,7 @@ async def human_type_text(
     warmup_end = random.randint(50, 150)
     warmup_peak = random.uniform(1.34, 1.54)
 
-    burst_left = random.randint(2, 7)
+    burst_left = random.randint(6, 14)
     newlines_seen = 0
     next_nav_at = random.randint(2, 5)
     prev_ch_global: Optional[str] = None
@@ -188,22 +188,24 @@ async def human_type_text(
                 report_progress()
                 prev_ch_global = "\b"
                 await asyncio.sleep(
-                    random.uniform(0.11, 0.34) * wm / 1000.0,
+                    random.uniform(0.11, 0.34) * wm,
                 )
                 continue
 
             cm = _complexity_multiplier(ch, idx_in_word, prev_ch_global)
             iki = sample_iki_ms(lo, hi) * wm * cm
+            iki = min(iki, hi * 2.2)
             after_ms = iki * random.uniform(0.07, 0.26)
+            press_ms = iki - after_ms
 
-            await page.keyboard.type(ch, delay=max(1.0, iki))
+            await page.keyboard.type(ch, delay=max(1.0, press_ms))
             typed += 1
             report_progress()
 
             burst_left -= 1
             if burst_left <= 0:
-                burst_left = random.randint(2, 7)
-                await asyncio.sleep(random.uniform(0.15, 0.52))
+                burst_left = random.randint(6, 14)
+                await asyncio.sleep(random.uniform(0.12, 0.40))
 
             await asyncio.sleep(after_ms / 1000.0)
             await _add_pause_after_char(ch)

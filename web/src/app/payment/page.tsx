@@ -23,7 +23,7 @@ export default function PaymentPage() {
                             Месячная
                         </h3>
                         <div className="flex items-baseline gap-1.5 mb-1.5">
-                            <span className="text-3xl md:text-4xl font-bold text-white">299 ₽</span>
+                            <span className="text-3xl md:text-4xl font-bold text-white">399 ₽</span>
                             <span className="text-xs md:text-sm text-[var(--text-muted)]">за месяц</span>
                         </div>
                         <p className="text-xs md:text-sm text-[var(--text-muted)]">
@@ -60,7 +60,7 @@ export default function PaymentPage() {
                 <div className="relative p-6 rounded-2xl bg-gradient-to-br from-[var(--primary)]/15 via-[var(--bg-surface)] to-[var(--primary)]/15 border-2 border-[var(--primary)] flex flex-col shadow-xl group">
                     <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-[11px] md:text-xs font-black px-4 py-1.5 rounded-2xl flex items-center gap-1.5 shadow-xl ring-2 ring-[var(--primary)]/30">
                         <MdStar className="text-sm" />
-                        ВЫГОДНО
+                        ВЫГОДНО −20%
                     </div>
 
                     <div className="mb-5 pt-4">
@@ -68,7 +68,7 @@ export default function PaymentPage() {
                             Студенческая
                         </h3>
                         <div className="flex items-baseline gap-1.5 mb-1.5">
-                            <span className="text-3xl md:text-4xl font-bold text-white">1 199 ₽</span>
+                            <span className="text-3xl md:text-4xl font-bold text-white">1 899 ₽</span>
                             <span className="text-xs md:text-sm text-[var(--text-muted)]">за 6 месяцев</span>
                         </div>
                         <p className="text-xs md:text-sm text-white/90">
@@ -107,11 +107,14 @@ export default function PaymentPage() {
                 {/* Годовая */}
                 <div className="relative p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border)] flex flex-col hover:border-[var(--text-muted)] transition-all group shadow-md hover:shadow-xl">
                     <div className="mb-5">
-                        <h3 className="text-lg font-semibold text-[var(--text-muted)] mb-2 group-hover:text-white transition-colors">
+                        <h3 className="text-lg font-semibold text-[var(--text-muted)] mb-2 group-hover:text-white transition-colors flex items-center gap-2">
                             Годовая
+                            <span className="text-[10px] md:text-xs font-black text-[var(--accent)] bg-[var(--accent)]/10 border border-[var(--accent)]/30 rounded-full px-2 py-0.5">
+                                −30%
+                            </span>
                         </h3>
                         <div className="flex items-baseline gap-1.5 mb-1.5">
-                            <span className="text-3xl md:text-4xl font-bold text-white">1 999 ₽</span>
+                            <span className="text-3xl md:text-4xl font-bold text-white">3 299 ₽</span>
                             <span className="text-xs md:text-sm text-[var(--text-muted)]">за год</span>
                         </div>
                         <p className="text-xs md:text-sm text-[var(--text-muted)]">
@@ -124,7 +127,6 @@ export default function PaymentPage() {
                             "Доступ ко всем функциям на 12 месяцев",
                             "Максимальный приоритет поддержки",
                             "Ранний доступ к новым функциям",
-                            "Работа на 3 устройствах одновременно",
                         ].map((item, i) => (
                             <li
                                 key={i}
@@ -142,6 +144,42 @@ export default function PaymentPage() {
                     >
                         Выбрать годовую
                     </Link>
+                </div>
+            </div>
+
+            {/* Доп: параллельные документы (скоро) */}
+            <div className="w-full max-w-6xl mb-16">
+                <div className="relative p-6 rounded-2xl bg-[var(--bg-surface)]/60 border border-dashed border-[var(--border)] flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+                    <div className="flex items-start gap-4">
+                        <div className="shrink-0 w-12 h-12 rounded-xl bg-[var(--primary)]/10 border border-[var(--primary)]/30 flex items-center justify-center text-[var(--primary)]">
+                            <MdRefresh className="text-2xl" />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <h3 className="text-lg font-bold text-white">Параллельные документы</h3>
+                                <span className="text-[10px] md:text-xs font-black text-[var(--text-muted)] bg-white/5 border border-[var(--border)] rounded-full px-2 py-0.5">
+                                    СКОРО
+                                </span>
+                            </div>
+                            <p className="text-xs md:text-sm text-[var(--text-muted)] max-w-md">
+                                Доп. подписка поверх основного тарифа — печать сразу в нескольких документах одновременно.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 shrink-0">
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-2xl md:text-3xl font-bold text-white">799 ₽</span>
+                            <span className="text-xs md:text-sm text-[var(--text-muted)]">в месяц</span>
+                        </div>
+                        <button
+                            type="button"
+                            disabled
+                            className="py-2.5 px-6 rounded-xl border border-[var(--border)] text-sm font-semibold text-[var(--text-muted)] cursor-not-allowed opacity-70"
+                        >
+                            Скоро
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -166,6 +204,22 @@ export default function PaymentPage() {
                         <MdRefresh className="text-xl text-[var(--accent)]" />
                         <span className="text-xs md:text-sm font-semibold text-white">Возврат 14 дней</span>
                     </div>
+                </div>
+
+                <div className="mt-6 pt-6 border-t border-[var(--border)] text-center">
+                    <h4 className="text-sm md:text-base font-semibold text-white mb-2">Как получить доступ</h4>
+                    <p className="text-xs md:text-sm text-[var(--text-muted)] max-w-2xl mx-auto leading-relaxed">
+                        Это цифровая услуга без физической доставки. После оплаты подписка активируется
+                        автоматически — статус виден в{" "}
+                        <a href="/profile" className="text-[var(--primary)] hover:underline">
+                            личном кабинете
+                        </a>
+                        , а приложение можно скачать на странице{" "}
+                        <a href="/download" className="text-[var(--primary)] hover:underline">
+                            /download
+                        </a>{" "}
+                        и привязать кодом из личного кабинета.
+                    </p>
                 </div>
             </div>
 

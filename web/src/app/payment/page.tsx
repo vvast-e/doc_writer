@@ -1,7 +1,124 @@
-import Link from "next/link";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { MdCheck, MdStar, MdRefresh, MdCreditCard, MdLock } from "react-icons/md";
 
+interface SubscriptionCatalogItem {
+    id: number;
+    name: string;
+    price: string;
+    currency: string;
+    period: number;
+    maxDevices: number;
+}
+
+// Presentation-only details the catalog API doesn't carry (copy, feature bullets, which
+// card gets the "highlighted" treatment). Keyed by Subscription.id from prisma/seed.ts.
+const PLAN_PRESENTATION: Record<
+    number,
+    {
+        description: string;
+        features: string[];
+        badge?: string;
+        highlighted?: boolean;
+        cta: string;
+        note?: string;
+    }
+> = {
+    1: {
+        description: "Если хочется попробовать на каждый день",
+        features: [
+            "Безлимитный набор текста",
+            "Google Docs, Word Online",
+            "Работа на 1 устройстве",
+            "Отмена в любой момент",
+        ],
+        cta: "Выбрать месячную",
+    },
+    2: {
+        description: "Закрывает весь семестр с первого дня занятий",
+        features: [
+            "Доступ ко всем функциям на 6 месяцев",
+            "Выгоднее, чем продлевать помесячно",
+            "Все обновления в течение семестра",
+            "Работа на 2 устройствах",
+            "Приоритетные ответы поддержки",
+        ],
+        badge: "ВЫГОДНО −20%",
+        highlighted: true,
+        cta: "Взять на семестр",
+        note: "Можно перейти на годовой позже",
+    },
+    3: {
+        description: "Для тех, кто регулярно учится",
+        features: [
+            "Доступ ко всем функциям на 12 месяцев",
+            "Максимальный приоритет поддержки",
+            "Ранний доступ к новым функциям",
+        ],
+        badge: "−30%",
+        cta: "Выбрать годовую",
+    },
+};
+
+function formatPrice(price: string, currency: string): string {
+    const value = Math.round(Number(price));
+    const formatted = value.toLocaleString("ru-RU");
+    return currency === "RUB" ? `${formatted} ₽` : `${formatted} ${currency}`;
+}
+
+function formatPeriod(period: number): string {
+    if (period === 1) return "за месяц";
+    if (period === 12) return "за год";
+    return `за ${period} месяцев`;
+}
+
 export default function PaymentPage() {
+    const router = useRouter();
+    const [subscriptions, setSubscriptions] = useState<SubscriptionCatalogItem[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [payingId, setPayingId] = useState<number | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        fetch("/api/subscriptions")
+            .then((res) => res.json())
+            .then((body) => {
+                if (body.ok) setSubscriptions(body.data as SubscriptionCatalogItem[]);
+            })
+            .finally(() => setLoading(false));
+    }, []);
+
+    const handlePay = async (subscriptionId: number) => {
+        setError(null);
+        setPayingId(subscriptionId);
+        try {
+            const res = await fetch("/api/payment/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ subscriptionId }),
+            });
+
+            if (res.status === 401) {
+                router.push("/auth");
+                return;
+            }
+
+            const body = await res.json();
+            if (!body.ok) {
+                setError(body.error?.message ?? "Не удалось создать платёж");
+                return;
+            }
+
+            window.location.href = body.data.confirmationUrl;
+        } catch {
+            setError("Не удалось создать платёж, попробуйте ещё раз");
+        } finally {
+            setPayingId(null);
+        }
+    };
+
     return (
         <div className="flex flex-col items-center w-full py-16 px-4">
             {/* Header */}
@@ -14,137 +131,131 @@ export default function PaymentPage() {
                 </p>
             </div>
 
+            {error && (
+                <div className="w-full max-w-6xl mb-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200 text-center">
+                    {error}
+                </div>
+            )}
+
             {/* Pricing Cards */}
             <div className="grid md:grid-cols-3 gap-6 max-w-6xl w-full mb-16">
-                {/* Месяц */}
-                <div className="relative p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border)] flex flex-col hover:border-[var(--text-muted)] transition-all group shadow-md hover:shadow-xl">
-                    <div className="mb-5">
-                        <h3 className="text-lg font-semibold text-[var(--text-muted)] mb-2 group-hover:text-white transition-colors">
-                            Месячная
-                        </h3>
-                        <div className="flex items-baseline gap-1.5 mb-1.5">
-                            <span className="text-3xl md:text-4xl font-bold text-white">399 ₽</span>
-                            <span className="text-xs md:text-sm text-[var(--text-muted)]">за месяц</span>
-                        </div>
-                        <p className="text-xs md:text-sm text-[var(--text-muted)]">
-                            Если хочется попробовать на каждый день
-                        </p>
+                {loading && (
+                    <div className="col-span-3 text-center text-[var(--text-muted)] py-10">
+                        Загрузка тарифов…
                     </div>
+                )}
 
-                    <ul className="space-y-2.5 mb-6 text-xs md:text-sm flex-grow">
-                        {[
-                            "Безлимитный набор текста",
-                            "Google Docs, Word Online",
-                            "Работа на 1 устройстве",
-                            "Отмена в любой момент",
-                        ].map((item, i) => (
-                            <li
-                                key={i}
-                                className="flex items-start gap-2.5 text-[var(--text-main)] group-hover:text-white transition-colors"
+                {!loading &&
+                    subscriptions.map((sub) => {
+                        const presentation = PLAN_PRESENTATION[sub.id] ?? {
+                            description: "",
+                            features: [`Работа на ${sub.maxDevices} устройстве(ах)`],
+                            cta: `Выбрать «${sub.name}»`,
+                        };
+                        const isPaying = payingId === sub.id;
+
+                        if (presentation.highlighted) {
+                            return (
+                                <div
+                                    key={sub.id}
+                                    className="relative p-6 rounded-2xl bg-gradient-to-br from-[var(--primary)]/15 via-[var(--bg-surface)] to-[var(--primary)]/15 border-2 border-[var(--primary)] flex flex-col shadow-xl group"
+                                >
+                                    {presentation.badge && (
+                                        <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-[11px] md:text-xs font-black px-4 py-1.5 rounded-2xl flex items-center gap-1.5 shadow-xl ring-2 ring-[var(--primary)]/30">
+                                            <MdStar className="text-sm" />
+                                            {presentation.badge}
+                                        </div>
+                                    )}
+
+                                    <div className="mb-5 pt-4">
+                                        <h3 className="text-lg font-bold text-[var(--primary)] mb-2">{sub.name}</h3>
+                                        <div className="flex items-baseline gap-1.5 mb-1.5">
+                                            <span className="text-3xl md:text-4xl font-bold text-white">
+                                                {formatPrice(sub.price, sub.currency)}
+                                            </span>
+                                            <span className="text-xs md:text-sm text-[var(--text-muted)]">
+                                                {formatPeriod(sub.period)}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs md:text-sm text-white/90">{presentation.description}</p>
+                                    </div>
+
+                                    <ul className="space-y-2.5 mb-6 text-xs md:text-sm flex-grow">
+                                        {presentation.features.map((item, i) => (
+                                            <li key={i} className="flex items-start gap-2.5 text-white/95">
+                                                <MdCheck className="text-lg text-[var(--accent)] shrink-0 mt-0.5" />
+                                                <span className="leading-snug">{item}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+
+                                    <button
+                                        type="button"
+                                        disabled={isPaying}
+                                        onClick={() => handlePay(sub.id)}
+                                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary)] text-sm font-bold text-white transition-all text-center shadow-xl hover:shadow-2xl ring-2 ring-[var(--primary)]/50 hover:ring-[var(--primary)]/70 transform hover:-translate-y-0.5 disabled:opacity-60"
+                                    >
+                                        {isPaying ? "Переход к оплате…" : presentation.cta}
+                                    </button>
+
+                                    {presentation.note && (
+                                        <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] md:text-xs text-white/80">
+                                            <MdRefresh className="text-sm" />
+                                            <span>{presentation.note}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div
+                                key={sub.id}
+                                className="relative p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border)] flex flex-col hover:border-[var(--text-muted)] transition-all group shadow-md hover:shadow-xl"
                             >
-                                <MdCheck className="text-lg text-[var(--accent)] shrink-0 mt-0.5" />
-                                <span className="leading-snug">{item}</span>
-                            </li>
-                        ))}
-                    </ul>
+                                <div className="mb-5">
+                                    <h3 className="text-lg font-semibold text-[var(--text-muted)] mb-2 group-hover:text-white transition-colors flex items-center gap-2">
+                                        {sub.name}
+                                        {presentation.badge && (
+                                            <span className="text-[10px] md:text-xs font-black text-[var(--accent)] bg-[var(--accent)]/10 border border-[var(--accent)]/30 rounded-full px-2 py-0.5">
+                                                {presentation.badge}
+                                            </span>
+                                        )}
+                                    </h3>
+                                    <div className="flex items-baseline gap-1.5 mb-1.5">
+                                        <span className="text-3xl md:text-4xl font-bold text-white">
+                                            {formatPrice(sub.price, sub.currency)}
+                                        </span>
+                                        <span className="text-xs md:text-sm text-[var(--text-muted)]">
+                                            {formatPeriod(sub.period)}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs md:text-sm text-[var(--text-muted)]">{presentation.description}</p>
+                                </div>
 
-                    <Link
-                        href="/auth"
-                        className="w-full py-2.5 rounded-xl border border-[var(--border)] text-sm font-semibold text-white hover:bg-[var(--border)] hover:border-[var(--text-muted)] transition-all text-center shadow-sm hover:shadow-md"
-                    >
-                        Выбрать месячную
-                    </Link>
-                </div>
+                                <ul className="space-y-2.5 mb-6 text-xs md:text-sm flex-grow">
+                                    {presentation.features.map((item, i) => (
+                                        <li
+                                            key={i}
+                                            className="flex items-start gap-2.5 text-[var(--text-main)] group-hover:text-white transition-colors"
+                                        >
+                                            <MdCheck className="text-lg text-[var(--accent)] shrink-0 mt-0.5" />
+                                            <span className="leading-snug">{item}</span>
+                                        </li>
+                                    ))}
+                                </ul>
 
-                {/* Студенческая (6 месяцев) – выгодно */}
-                <div className="relative p-6 rounded-2xl bg-gradient-to-br from-[var(--primary)]/15 via-[var(--bg-surface)] to-[var(--primary)]/15 border-2 border-[var(--primary)] flex flex-col shadow-xl group">
-                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-[11px] md:text-xs font-black px-4 py-1.5 rounded-2xl flex items-center gap-1.5 shadow-xl ring-2 ring-[var(--primary)]/30">
-                        <MdStar className="text-sm" />
-                        ВЫГОДНО −20%
-                    </div>
-
-                    <div className="mb-5 pt-4">
-                        <h3 className="text-lg font-bold text-[var(--primary)] mb-2">
-                            Студенческая
-                        </h3>
-                        <div className="flex items-baseline gap-1.5 mb-1.5">
-                            <span className="text-3xl md:text-4xl font-bold text-white">1 899 ₽</span>
-                            <span className="text-xs md:text-sm text-[var(--text-muted)]">за 6 месяцев</span>
-                        </div>
-                        <p className="text-xs md:text-sm text-white/90">
-                            Закрывает весь семестр с первого дня занятий
-                        </p>
-                    </div>
-
-                    <ul className="space-y-2.5 mb-6 text-xs md:text-sm flex-grow">
-                        {[
-                            "Доступ ко всем функциям на 6 месяцев",
-                            "Выгоднее, чем продлевать помесячно",
-                            "Все обновления в течение семестра",
-                            "Работа на 2 устройствах",
-                            "Приоритетные ответы поддержки",
-                        ].map((item, i) => (
-                            <li key={i} className="flex items-start gap-2.5 text-white/95">
-                                <MdCheck className="text-lg text-[var(--accent)] shrink-0 mt-0.5" />
-                                <span className="leading-snug">{item}</span>
-                            </li>
-                        ))}
-                    </ul>
-
-                    <Link
-                        href="/auth"
-                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary)] text-sm font-bold text-white transition-all text-center shadow-xl hover:shadow-2xl ring-2 ring-[var(--primary)]/50 hover:ring-[var(--primary)]/70 transform hover:-translate-y-0.5"
-                    >
-                        Взять на семестр
-                    </Link>
-
-                    <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] md:text-xs text-white/80">
-                        <MdRefresh className="text-sm" />
-                        <span>Можно перейти на годовой позже</span>
-                    </div>
-                </div>
-
-                {/* Годовая */}
-                <div className="relative p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border)] flex flex-col hover:border-[var(--text-muted)] transition-all group shadow-md hover:shadow-xl">
-                    <div className="mb-5">
-                        <h3 className="text-lg font-semibold text-[var(--text-muted)] mb-2 group-hover:text-white transition-colors flex items-center gap-2">
-                            Годовая
-                            <span className="text-[10px] md:text-xs font-black text-[var(--accent)] bg-[var(--accent)]/10 border border-[var(--accent)]/30 rounded-full px-2 py-0.5">
-                                −30%
-                            </span>
-                        </h3>
-                        <div className="flex items-baseline gap-1.5 mb-1.5">
-                            <span className="text-3xl md:text-4xl font-bold text-white">3 299 ₽</span>
-                            <span className="text-xs md:text-sm text-[var(--text-muted)]">за год</span>
-                        </div>
-                        <p className="text-xs md:text-sm text-[var(--text-muted)]">
-                            Для тех, кто регулярно учится
-                        </p>
-                    </div>
-
-                    <ul className="space-y-2.5 mb-6 text-xs md:text-sm flex-grow">
-                        {[
-                            "Доступ ко всем функциям на 12 месяцев",
-                            "Максимальный приоритет поддержки",
-                            "Ранний доступ к новым функциям",
-                        ].map((item, i) => (
-                            <li
-                                key={i}
-                                className="flex items-start gap-2.5 text-[var(--text-main)] group-hover:text-white transition-colors"
-                            >
-                                <MdCheck className="text-lg text-[var(--accent)] shrink-0 mt-0.5" />
-                                <span className="leading-snug">{item}</span>
-                            </li>
-                        ))}
-                    </ul>
-
-                    <Link
-                        href="/auth"
-                        className="w-full py-2.5 rounded-xl border border-[var(--border)] text-sm font-semibold text-white hover:bg-[var(--border)] hover:border-[var(--text-muted)] transition-all text-center shadow-sm hover:shadow-md"
-                    >
-                        Выбрать годовую
-                    </Link>
-                </div>
+                                <button
+                                    type="button"
+                                    disabled={isPaying}
+                                    onClick={() => handlePay(sub.id)}
+                                    className="w-full py-2.5 rounded-xl border border-[var(--border)] text-sm font-semibold text-white hover:bg-[var(--border)] hover:border-[var(--text-muted)] transition-all text-center shadow-sm hover:shadow-md disabled:opacity-60"
+                                >
+                                    {isPaying ? "Переход к оплате…" : presentation.cta}
+                                </button>
+                            </div>
+                        );
+                    })}
             </div>
 
             {/* Доп: параллельные документы (скоро) */}

@@ -63,6 +63,8 @@ export default function RootLayout({
             </div>
             <p className="text-center text-sm text-[var(--text-muted)] md:text-right">
               © 2026 HumanType. Все права защищены.
+              <br />
+              ИНН 505204469403
             </p>
           </div>
         </footer>

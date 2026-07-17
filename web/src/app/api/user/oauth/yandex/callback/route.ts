@@ -5,7 +5,7 @@ import {
   findOrCreateUserFromOAuth,
   requireEnv,
 } from '@/backend/modules/oauth/common';
-import { exchangeGoogleCode } from '@/backend/modules/oauth/google';
+import { exchangeYandexCode } from '@/backend/modules/oauth/yandex';
 import { setSessionCookie } from '@/backend/shared/session';
 
 export async function GET(request: NextRequest) {
@@ -19,14 +19,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const profile = await exchangeGoogleCode(code);
-    const userId = await findOrCreateUserFromOAuth('google', profile);
+    const profile = await exchangeYandexCode(code);
+    const userId = await findOrCreateUserFromOAuth('yandex', profile);
     const response = NextResponse.redirect(`${baseUrl}/pair`);
     clearShortLivedCookie(response, OAUTH_STATE_COOKIE);
     setSessionCookie(response, userId);
     return response;
   } catch (error) {
-    console.error('Google OAuth callback error:', error);
+    console.error('Yandex OAuth callback error:', error);
     return NextResponse.redirect(`${baseUrl}/auth?error=oauth_failed`);
   }
 }

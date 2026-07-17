@@ -1,46 +1,70 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { motion } from "framer-motion";
+import { useAuth } from "@/hooks/useAuth";
+
+// Keep in sync with APP_BASE_URL in src-tauri/src/lib.rs.
+const APP_BASE_URL = "https://humantype.ru";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const { status, redeemCode, error: authError } = useAuth();
+  const [code, setCode] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [localError, setLocalError] = useState("");
 
-  const handleLogin = async () => {
-    setError("");
-    setIsLoading(true);
-
-    try {
-      if (username === "test" && password === "test") {
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    (async () => {
+      try {
         const exists = await invoke<boolean>("check_profile_exists");
-        if (exists) {
-          navigate("/main");
-        } else {
-          navigate("/profile");
-        }
-      } else {
-        setError("Неверный логин или пароль");
+        navigate(exists ? "/main" : "/profile");
+      } catch {
+        navigate("/profile");
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка при проверке профиля");
+    })();
+  }, [status, navigate]);
+
+  const handleOpenPairing = async () => {
+    await openUrl(`${APP_BASE_URL}/pair`);
+  };
+
+  const handleSubmit = async () => {
+    setLocalError("");
+    if (code.trim().length !== 6) {
+      setLocalError("Код должен состоять из 6 цифр");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const ok = await redeemCode(code.trim());
+      if (!ok) {
+        setLocalError(authError ?? "Не удалось привязать устройство");
+      }
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
-      handleLogin();
+      handleSubmit();
     }
   };
+
+  if (status === "loading" || status === "authenticated") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted">
+        <p className="text-sm text-muted-foreground">Проверка авторизации...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted">
@@ -58,46 +82,39 @@ export function LoginPage() {
               </span>
             </CardTitle>
             <CardDescription className="text-sm text-muted-foreground">
-              Войдите для использования приложения
+              Привяжите устройство, чтобы начать работу
             </CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-4">
+            <Button className="w-full" variant="outline" type="button" onClick={handleOpenPairing}>
+              Открыть привязку устройства
+            </Button>
+
             <div className="space-y-2">
-              <Label htmlFor="username">Логин</Label>
+              <Label htmlFor="pairing-code">Код из личного кабинета</Label>
               <Input
-                id="username"
-                placeholder="Введите логин"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                id="pairing-code"
+                placeholder="000000"
+                value={code}
+                maxLength={6}
+                inputMode="numeric"
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
                 onKeyDown={handleKeyDown}
-                autoComplete="username"
+                autoComplete="one-time-code"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Пароль</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Введите пароль"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={handleKeyDown}
-                autoComplete="current-password"
-              />
-            </div>
-
-            {error && (
-              <p className="text-sm text-red-500 text-center">{error}</p>
+            {localError && (
+              <p className="text-sm text-red-500 text-center">{localError}</p>
             )}
 
             <Button
               className="w-full"
-              onClick={handleLogin}
-              disabled={isLoading || !username || !password}
+              onClick={handleSubmit}
+              disabled={isSubmitting || code.length !== 6}
             >
-              {isLoading ? "Проверка..." : "Войти"}
+              {isSubmitting ? "Проверка..." : "Войти"}
             </Button>
           </CardContent>
         </Card>

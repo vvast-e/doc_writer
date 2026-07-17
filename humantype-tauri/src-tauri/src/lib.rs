@@ -674,8 +674,153 @@ async fn stop_typing(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+const APP_BASE_URL: &str = "https://humantype.ru";
+const KEYRING_SERVICE: &str = "humantype-tauri";
+const KEYRING_ACCOUNT: &str = "device_token";
+
+fn warn_if_insecure_transport() {
+    if !APP_BASE_URL.starts_with("https://") {
+        eprintln!(
+            "[security] APP_BASE_URL ({}) is not HTTPS — device tokens travel in plaintext. \
+             Set up TLS on the backend before shipping a release build.",
+            APP_BASE_URL
+        );
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ApiEnvelope<T> {
+    ok: bool,
+    #[serde(default)]
+    data: Option<T>,
+    #[serde(default)]
+    error: Option<ApiErrorBody>,
+}
+
+#[derive(serde::Deserialize)]
+struct ApiErrorBody {
+    message: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct SubscriptionInfo {
+    #[serde(rename = "subscriptionId")]
+    subscription_id: i64,
+    name: String,
+    #[serde(rename = "maxDevices")]
+    max_devices: i64,
+    #[serde(rename = "expiresAt")]
+    expires_at: String,
+    #[serde(rename = "autoRenew", default)]
+    auto_renew: Option<bool>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct UserBasic {
+    id: String,
+    email: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct RedeemResponse {
+    token: String,
+    user: UserBasic,
+    subscription: Option<SubscriptionInfo>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct UserProfileResponse {
+    id: String,
+    email: Option<String>,
+    name: Option<String>,
+    subscription: Option<SubscriptionInfo>,
+}
+
+async fn parse_envelope<T: serde::de::DeserializeOwned>(
+    res: reqwest::Response,
+    fallback_message: &str,
+) -> Result<T, String> {
+    let status = res.status();
+    let envelope: ApiEnvelope<T> = res
+        .json()
+        .await
+        .map_err(|e| format!("Некорректный ответ сервера: {}", e))?;
+
+    if !envelope.ok || status.as_u16() >= 400 {
+        return Err(envelope
+            .error
+            .map(|e| e.message)
+            .unwrap_or_else(|| fallback_message.to_string()));
+    }
+
+    envelope.data.ok_or_else(|| fallback_message.to_string())
+}
+
+fn keyring_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+        .map_err(|e| format!("Не удалось открыть хранилище ключей: {}", e))
+}
+
+#[tauri::command]
+async fn redeem_pairing_code(code: String) -> Result<RedeemResponse, String> {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{}/api/device/redeem", APP_BASE_URL))
+        .json(&serde_json::json!({ "code": code }))
+        .send()
+        .await
+        .map_err(|e| format!("Не удалось связаться с сервером: {}", e))?;
+
+    let data: RedeemResponse = parse_envelope(res, "Не удалось привязать устройство").await?;
+
+    keyring_entry()?
+        .set_password(&data.token)
+        .map_err(|e| format!("Не удалось сохранить токен: {}", e))?;
+
+    Ok(data)
+}
+
+#[tauri::command]
+async fn get_stored_token() -> Result<Option<String>, String> {
+    match keyring_entry()?.get_password() {
+        Ok(token) => Ok(Some(token)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Не удалось прочитать токен: {}", e)),
+    }
+}
+
+#[tauri::command]
+async fn clear_device_token() -> Result<(), String> {
+    match keyring_entry()?.delete_credential() {
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("Не удалось удалить токен: {}", e)),
+    }
+}
+
+#[tauri::command]
+async fn validate_device_token() -> Result<UserProfileResponse, String> {
+    let token = match keyring_entry()?.get_password() {
+        Ok(token) => token,
+        Err(keyring::Error::NoEntry) => return Err("Устройство не привязано".to_string()),
+        Err(e) => return Err(format!("Не удалось прочитать токен: {}", e)),
+    };
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{}/api/user", APP_BASE_URL))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Не удалось связаться с сервером: {}", e))?;
+
+    parse_envelope(res, "Токен недействителен").await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    warn_if_insecure_transport();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -688,6 +833,10 @@ pub fn run() {
             get_profile_path,
             check_profile_exists,
             open_chromium_for_login,
+            redeem_pairing_code,
+            get_stored_token,
+            clear_device_token,
+            validate_device_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -48,29 +48,29 @@ export default function AuthPage() {
 
                     {/* OAuth */}
                     <div className="space-y-2.5 mb-4">
-                        <Link
-                            href="/profile"
+                        <a
+                            href="/api/user/oauth/yandex"
                             className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-main)]/80 px-3 py-2.5 text-xs md:text-sm font-medium text-[var(--text-main)] hover:border-[#FC3F1D] hover:text-white transition"
                         >
                             <FaYandex className="text-base md:text-lg text-[#FC3F1D]" />
                             {mode === "login" ? "Войти через Яндекс" : "Продолжить через Яндекс"}
-                        </Link>
+                        </a>
 
-                        <Link
-                            href="/profile"
+                        <a
+                            href="/api/user/oauth/vk"
                             className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-main)]/80 px-3 py-2.5 text-xs md:text-sm font-medium text-[var(--text-main)] hover:border-[#0077FF] hover:text-white transition"
                         >
                             <FaVk className="text-base md:text-lg text-[#0077FF]" />
                             {mode === "login" ? "Войти через VK ID" : "Продолжить через VK ID"}
-                        </Link>
+                        </a>
 
-                        <Link
-                            href="/profile"
+                        <a
+                            href="/api/user/oauth/google"
                             className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-main)]/80 px-3 py-2.5 text-xs md:text-sm font-medium text-[var(--text-main)] hover:border-[#FFFFFF] hover:text-white transition"
                         >
                             <FaGoogle className="text-base md:text-lg text-[#FFFFFF]" />
                             {mode === "login" ? "Войти через Google" : "Продолжить через Google"}
-                        </Link>
+                        </a>
                     </div>
 
                     <p className="mt-4 text-center text-[11px] md:text-xs text-[var(--text-muted)]">

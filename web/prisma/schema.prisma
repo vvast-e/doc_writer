@@ -29,6 +29,7 @@ model User {
   transactions    Transaction[]
   devices         Device[]
   deviceKeyAudits DeviceKeyAudit[]
+  pairingCodes    PairingCode[]
 }
 
 model UserOAuthAccount {
@@ -122,6 +123,19 @@ model Device {
 
   user           User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
   deviceKeyAudit DeviceKeyAudit[]
+
+  @@index([user_id])
+}
+
+model PairingCode {
+  id         String    @id @default(uuid())
+  code       String    @unique
+  user_id    String
+  expires_at DateTime
+  used_at    DateTime?
+  created_at DateTime  @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
 }

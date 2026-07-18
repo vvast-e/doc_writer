@@ -58,7 +58,13 @@ export function TypingSessionCard({
     chromeExePath: "",
     minDelayMs: 170,
     maxDelayMs: 580,
-    closeBrowser: true,
+    // false по умолчанию: браузер общий на все карточки (Фаза 5), и Rust
+    // закрывает его, как только реестр активных сессий опустеет ХОТЯ БЫ НА
+    // МГНОВЕНИЕ (lib.rs close_browser_requested) — с true по умолчанию первая
+    // же завершившаяся карточка убивала бы браузер под ещё не стартовавшими
+    // соседними карточками. Пользователь включает это осознанно, когда точно
+    // не планирует больше сессий.
+    closeBrowser: false,
   });
 
   const [errors, setErrors] = useState<FieldErrors>({});

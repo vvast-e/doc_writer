@@ -1,19 +1,10 @@
-import { TypingForm } from "@/components/sections/TypingForm";
+import { MainPage } from "@/pages/MainPage";
 
+// Не используется в роутинге App.tsx (см. историю — оставлено на всякий
+// случай как алиас). Держим компилируемым, переиспользуя MainPage вместо
+// дублирования разметки формы набора.
 export function Home() {
-  return (
-    <div className="min-h-screen text-foreground">
-      <header className="bg-background border-b border-border p-4">
-        <h1 className="text-xl font-semibold bg-gradient-to-r from-green-500 to-red-500 bg-clip-text text-transparent">
-          HumanType
-        </h1>
-      </header>
-
-      <main className="container mx-auto max-w-4xl p-6">
-        <TypingForm />
-      </main>
-    </div>
-  );
+  return <MainPage />;
 }
 
 export default Home;

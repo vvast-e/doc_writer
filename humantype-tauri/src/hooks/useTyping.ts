@@ -32,16 +32,30 @@ function normalizeInvokeError(error: unknown, fallback: string): string {
 }
 
 interface ProgressPayload {
+  session_id?: string;
   typed?: number;
   total?: number;
   progress?: number;
 }
 
+interface SessionScopedPayload {
+  session_id?: string;
+}
+
 interface ErrorPayload {
+  session_id?: string;
   error?: string;
 }
 
-export function useTyping() {
+/**
+ * Фаза 5: браузер общий на все сессии печати (Rust держит один sidecar,
+ * см. lib.rs SidecarHandle), поэтому события `typing:*` приходят global-broadcast
+ * со всех сессий разом — каждый payload несёт свой `session_id`, и этот хук
+ * фильтрует поток по `sessionId`, чтобы карточка видела только свои события.
+ * Исключение — `typing:terminated`: он не несёт session_id (умирает весь
+ * sidecar/браузер разом), поэтому применяется ко ВСЕМ карточкам без фильтра.
+ */
+export function useTyping(sessionId: string) {
   const [isTyping, setIsTyping] = useState(false);
   const [progress, setProgress] = useState<number>(0);
   const [typed, setTyped] = useState<number>(0);
@@ -65,6 +79,8 @@ export function useTyping() {
     const setup = async () => {
       unlisteners.push(
         await listen<ProgressPayload>("typing:progress", (event) => {
+          if (event.payload?.session_id !== sessionId) return;
+
           const p = event.payload?.progress ?? 0;
           const typedNow = event.payload?.typed ?? 0;
           const totalNow = event.payload?.total ?? 0;
@@ -107,19 +123,25 @@ export function useTyping() {
       );
 
       unlisteners.push(
-        await listen<{ total?: number }>("typing:started", (event) => {
-          sidecarErroredRef.current = false;
-          setProgress(0);
-          setTyped(0);
-          setTotal(event.payload?.total ?? 0);
-          setEtaRemainingSec(null);
-          firstProgressRef.current = null;
-          setStatus({ type: "running", message: "Браузер запускается..." });
-        }),
+        await listen<{ session_id?: string; total?: number }>(
+          "typing:started",
+          (event) => {
+            if (event.payload?.session_id !== sessionId) return;
+
+            sidecarErroredRef.current = false;
+            setProgress(0);
+            setTyped(0);
+            setTotal(event.payload?.total ?? 0);
+            setEtaRemainingSec(null);
+            firstProgressRef.current = null;
+            setStatus({ type: "running", message: "Браузер запускается..." });
+          },
+        ),
       );
 
       unlisteners.push(
-        await listen("typing:login_wait", () => {
+        await listen<SessionScopedPayload>("typing:login_wait", (event) => {
+          if (event.payload?.session_id !== sessionId) return;
           setStatus({
             type: "running",
             message: "Войдите в Google в открывшемся окне браузера...",
@@ -128,7 +150,8 @@ export function useTyping() {
       );
 
       unlisteners.push(
-        await listen("typing:done", () => {
+        await listen<SessionScopedPayload>("typing:done", (event) => {
+          if (event.payload?.session_id !== sessionId) return;
           setStatus({ type: "success", message: "Готово" });
           setIsTyping(false);
           setEtaRemainingSec(null);
@@ -136,7 +159,8 @@ export function useTyping() {
       );
 
       unlisteners.push(
-        await listen("typing:stopped", () => {
+        await listen<SessionScopedPayload>("typing:stopped", (event) => {
+          if (event.payload?.session_id !== sessionId) return;
           setStatus({ type: "idle", message: "Остановлено" });
           setIsTyping(false);
           setEtaRemainingSec(null);
@@ -145,6 +169,7 @@ export function useTyping() {
 
       unlisteners.push(
         await listen<ErrorPayload>("typing:error", (event) => {
+          if (event.payload?.session_id !== sessionId) return;
           sidecarErroredRef.current = true;
           const msg = event.payload?.error ?? "Неизвестная ошибка";
           setStatus({ type: "error", message: `Ошибка: ${msg}` });
@@ -154,7 +179,8 @@ export function useTyping() {
 
       unlisteners.push(
         await listen<{ status?: string }>("typing:terminated", (event) => {
-          // Если done/stopped/error уже пришли — игнорируем; иначе считаем падением.
+          // Без session_id: умер весь sidecar/браузер — общий на все карточки,
+          // поэтому применяется без фильтра по sessionId.
           setIsTyping((wasTyping) => {
             if (!wasTyping) return wasTyping;
             if (sidecarErroredRef.current) return false;
@@ -180,10 +206,11 @@ export function useTyping() {
         }
       }
     };
-  }, []);
+  }, [sessionId]);
 
   const startTyping = async (
     values: TypingFormValues,
+    maxConcurrentSessions: number,
     mcP50Sec?: number | null,
   ) => {
     setIsTyping(true);
@@ -198,6 +225,7 @@ export function useTyping() {
 
     try {
       await invoke("start_typing", {
+        sessionId,
         docUrl: values.docUrl,
         textSource: values.textSource,
         textFilePath: values.textSource === "file" ? values.textFilePath : null,
@@ -207,6 +235,7 @@ export function useTyping() {
         minDelayMs: values.minDelayMs,
         maxDelayMs: values.maxDelayMs,
         closeBrowser: values.closeBrowser,
+        maxConcurrent: maxConcurrentSessions,
       });
       // Дальше состояние двигают события из sidecar.
     } catch (error) {
@@ -218,7 +247,7 @@ export function useTyping() {
 
   const stopTyping = async () => {
     try {
-      await invoke("stop_typing");
+      await invoke("stop_typing", { sessionId });
       setStatus({ type: "running", message: "Останавливаю..." });
     } catch (error) {
       const message = normalizeInvokeError(error, "Не удалось остановить набор");

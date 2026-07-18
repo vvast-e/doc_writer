@@ -799,6 +799,8 @@ struct SubscriptionInfo {
     name: String,
     #[serde(rename = "maxDevices")]
     max_devices: i64,
+    #[serde(rename = "maxConcurrentSessions")]
+    max_concurrent_sessions: i64,
     #[serde(rename = "expiresAt")]
     expires_at: String,
     #[serde(rename = "autoRenew", default)]

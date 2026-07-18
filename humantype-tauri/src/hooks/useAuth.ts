@@ -5,6 +5,7 @@ export interface SubscriptionInfo {
   subscriptionId: number;
   name: string;
   maxDevices: number;
+  maxConcurrentSessions: number;
   expiresAt: string;
   autoRenew?: boolean;
 }

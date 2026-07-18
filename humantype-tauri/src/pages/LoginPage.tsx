@@ -14,7 +14,7 @@ const APP_BASE_URL = "https://humantype.ru";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { status, redeemCode, error: authError } = useAuth();
+  const { status, redeemCode } = useAuth();
   const [code, setCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState("");
@@ -43,9 +43,9 @@ export function LoginPage() {
     }
     setIsSubmitting(true);
     try {
-      const ok = await redeemCode(code.trim());
-      if (!ok) {
-        setLocalError(authError ?? "Не удалось привязать устройство");
+      const errorMessage = await redeemCode(code.trim());
+      if (errorMessage) {
+        setLocalError(errorMessage);
       }
     } finally {
       setIsSubmitting(false);

@@ -28,7 +28,7 @@ interface UseAuthResult {
   status: AuthStatus;
   profile: AuthProfile | null;
   error: string | null;
-  redeemCode: (code: string) => Promise<boolean>;
+  redeemCode: (code: string) => Promise<string | null>;
   refresh: () => Promise<void>;
 }
 
@@ -70,10 +70,11 @@ export function useAuth(): UseAuthResult {
         subscription: result.subscription,
       });
       setStatus("authenticated");
-      return true;
+      return null;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      return false;
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      return message;
     }
   }, []);
 

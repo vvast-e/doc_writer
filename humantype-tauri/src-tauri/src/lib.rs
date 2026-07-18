@@ -691,7 +691,6 @@ fn warn_if_insecure_transport() {
 #[derive(serde::Deserialize)]
 struct ApiEnvelope<T> {
     ok: bool,
-    #[serde(default)]
     data: Option<T>,
     #[serde(default)]
     error: Option<ApiErrorBody>,

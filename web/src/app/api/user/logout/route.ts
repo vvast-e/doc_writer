@@ -1,6 +1,8 @@
-import { notImplemented } from '@/backend/shared/http';
+import { ok } from '@/backend/shared/http';
+import { clearSessionCookie } from '@/backend/shared/session';
 
-// Полная логика — Phase 3.
 export async function POST() {
-  return notImplemented();
+  const response = ok({ loggedOut: true });
+  clearSessionCookie(response);
+  return response;
 }

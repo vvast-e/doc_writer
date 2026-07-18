@@ -1,0 +1,3 @@
+humantype.ru {
+	reverse_proxy web:3000
+}

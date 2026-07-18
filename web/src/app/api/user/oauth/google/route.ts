@@ -1,6 +1,10 @@
-import { notImplemented } from '@/backend/shared/http';
+import { NextResponse } from 'next/server';
+import { OAUTH_STATE_COOKIE, randomToken, setShortLivedCookie } from '@/backend/modules/oauth/common';
+import { getGoogleAuthorizeUrl } from '@/backend/modules/oauth/google';
 
-// Полная логика — Phase 3.
 export async function GET() {
-  return notImplemented();
+  const state = randomToken();
+  const response = NextResponse.redirect(getGoogleAuthorizeUrl(state));
+  setShortLivedCookie(response, OAUTH_STATE_COOKIE, state);
+  return response;
 }

@@ -24,11 +24,26 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-humantype}:${POSTGRES_PASSWORD:-humantype}@postgres:5432/${POSTGRES_DB:-humantype}
-    ports:
-      - "3000:3000"
+    # No host port mapping — only reachable via the "caddy" service over the internal
+    # docker network (by service name "web"), so TLS termination can't be bypassed.
     depends_on:
       postgres:
         condition: service_healthy
 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:

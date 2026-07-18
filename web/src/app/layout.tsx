@@ -44,25 +44,27 @@ export default function RootLayout({
             <div className="flex flex-wrap justify-center gap-4 text-sm text-[var(--text-muted)]">
               <Link
                 className="rounded-md px-2 py-1 transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
-                href="#"
+                href="/privacy"
               >
                 Privacy
               </Link>
               <Link
                 className="rounded-md px-2 py-1 transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
-                href="#"
+                href="/oferta"
               >
                 Terms
               </Link>
               <Link
                 className="rounded-md px-2 py-1 transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
-                href="#"
+                href="/contacts"
               >
                 Support
               </Link>
             </div>
             <p className="text-center text-sm text-[var(--text-muted)] md:text-right">
               © 2026 HumanType. Все права защищены.
+              <br />
+              ИНН 505204469403
             </p>
           </div>
         </footer>

@@ -489,6 +489,92 @@ async def ensure_page(context: BrowserContext) -> Page:
     return await context.new_page()
 
 
+async def launch_persistent_browser(
+    p,
+    user_data_dir: Path,
+    chrome_exe_path: Optional[Path],
+) -> BrowserContext:
+    """Поднимает persistent context Chromium/Chrome на указанном профиле.
+
+    Вынесено отдельно от `run_google_docs_typing`, чтобы мультиплекс-режим
+    (main.py --multiplex) мог поднять ОДИН браузер на всё время жизни sidecar
+    и открывать в нём по вкладке на сессию печати, вместо отдельного браузера
+    на каждую сессию (см. Фаза 5 роадмапа — общий профиль/логин, N вкладок).
+    """
+    if not user_data_dir.exists():
+        raise FileNotFoundError(f"Каталог профиля Chrome не найден: {user_data_dir}")
+
+    executable_path_str: Optional[str] = (
+        str(chrome_exe_path) if chrome_exe_path else None
+    )
+    chrome_args = ["--disable-blink-features=AutomationControlled"]
+    return await p.chromium.launch_persistent_context(
+        user_data_dir=str(user_data_dir),
+        headless=False,
+        executable_path=executable_path_str,
+        args=chrome_args,
+    )
+
+
+async def open_and_type_in_session(
+    context: BrowserContext,
+    *,
+    doc_url: str,
+    text: str,
+    min_delay_ms: int,
+    max_delay_ms: int,
+    stop_flag: Optional[threading.Event] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    login_wait_callback: Optional[Callable[[], None]] = None,
+    login_wait_timeout_s: int = 180,
+) -> None:
+    """Открывает НОВУЮ вкладку в уже запущенном `context`, печатает в неё и
+    закрывает вкладку по завершении. Используется мультиплекс-режимом —
+    несколько параллельных вызовов (свой asyncio.Task на сессию) делят один
+    и тот же браузер/профиль/логин; `stop_flag` здесь — per-session
+    `asyncio.Event` (duck-type совместим с `threading.Event`: используется
+    только `.is_set()`/`.set()`).
+    """
+    page = await context.new_page()
+    try:
+        await page.goto(doc_url, wait_until="domcontentloaded")
+        await page.wait_for_timeout(2800)
+
+        if "accounts.google.com" in page.url or "ServiceLogin" in page.url:
+            _log("Требуется ручной вход в Google. Ожидание авторизации...")
+            if login_wait_callback is not None:
+                try:
+                    login_wait_callback()
+                except Exception:
+                    pass
+            await wait_for_google_login(
+                page,
+                timeout_ms=login_wait_timeout_s * 1000,
+                stop_flag=stop_flag,
+            )
+            _log("Вход выполнен, продолжаем работу с документом.")
+
+        try:
+            await focus_document_body(page)
+        except Exception as exc:
+            _log(f"Критическая ошибка фокуса: {exc}")
+            return
+
+        try:
+            await human_type_text(
+                page, text, min_delay_ms, max_delay_ms,
+                progress_callback=progress_callback,
+                stop_flag=stop_flag,
+            )
+        except TypingStopped:
+            _log("Набор прерван пользователем.")
+    finally:
+        try:
+            await page.close()
+        except Exception:
+            pass
+
+
 def load_text(text_file: Path) -> str:
     if not text_file.is_file():
         raise FileNotFoundError(f"Файл с текстом не найден: {text_file}")
@@ -527,9 +613,6 @@ async def run_google_docs_typing(
     login_wait_callback: Optional[Callable[[], None]] = None,
     login_wait_timeout_s: int = 180,
 ) -> None:
-    if not user_data_dir.exists():
-        raise FileNotFoundError(f"Каталог профиля Chrome не найден: {user_data_dir}")
-
     _log(f"Запуск с параметрами: doc_url={doc_url!r}")
     _log(f"user_data_dir={user_data_dir}")
     _log(f"chrome_exe_path={chrome_exe_path}")
@@ -537,23 +620,12 @@ async def run_google_docs_typing(
         f"delays: min={min_delay_ms} ms, max={max_delay_ms} ms, close_browser={close_browser}"
     )
 
-    executable_path_str: Optional[str] = (
-        str(chrome_exe_path) if chrome_exe_path else None
-    )
     context: Optional[BrowserContext] = None
 
     try:
         async with async_playwright() as p:
             _log("Создаём persistent context Chromium/Chrome...")
-            chrome_args = [
-                "--disable-blink-features=AutomationControlled",
-            ]
-            context = await p.chromium.launch_persistent_context(
-                user_data_dir=str(user_data_dir),
-                headless=False,
-                executable_path=executable_path_str,
-                args=chrome_args,
-            )
+            context = await launch_persistent_browser(p, user_data_dir, chrome_exe_path)
 
             page = await ensure_page(context)
             _log("Открыта первая страница, выполняем переход к документу...")

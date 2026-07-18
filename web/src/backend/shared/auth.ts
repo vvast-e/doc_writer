@@ -20,5 +20,9 @@ export async function authenticateDevice(
   const device = await prisma.device.findUnique({ where: { key: token } });
   if (!device || !device.is_active) return null;
 
+  prisma.device
+    .update({ where: { id: device.id }, data: { last_seen_at: new Date() } })
+    .catch((error) => console.error('Failed to update device last_seen_at:', error));
+
   return { deviceId: device.id, userId: device.user_id };
 }

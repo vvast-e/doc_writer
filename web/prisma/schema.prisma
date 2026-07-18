@@ -29,6 +29,7 @@ model User {
   transactions    Transaction[]
   devices         Device[]
   deviceKeyAudits DeviceKeyAudit[]
+  pairingCodes    PairingCode[]
 }
 
 model UserOAuthAccount {
@@ -49,16 +50,17 @@ model UserOAuthAccount {
 }
 
 model Subscription {
-  id          Int      @id
-  name        String
-  price       Decimal
-  currency    String   @default("RUB")
-  period      Int      @default(1) // 1, 12, 6
-  max_devices Int
-  is_active   Boolean  @default(true)
-  sort_order  Int      @default(100)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id                      Int      @id
+  name                    String
+  price                   Decimal
+  currency                String   @default("RUB")
+  period                  Int      @default(1) // 1, 12, 6
+  max_devices             Int
+  max_concurrent_sessions Int      @default(1) // лимит параллельных сессий печати в приложении
+  is_active               Boolean  @default(true)
+  sort_order              Int      @default(100)
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
 
   userSubscriptions UserSubscription[]
   transactions      Transaction[]
@@ -122,6 +124,19 @@ model Device {
 
   user           User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
   deviceKeyAudit DeviceKeyAudit[]
+
+  @@index([user_id])
+}
+
+model PairingCode {
+  id         String    @id @default(uuid())
+  code       String    @unique
+  user_id    String
+  expires_at DateTime
+  used_at    DateTime?
+  created_at DateTime  @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
 }

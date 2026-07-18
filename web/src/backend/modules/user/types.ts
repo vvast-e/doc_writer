@@ -6,6 +6,7 @@ export interface UserProfile {
     subscriptionId: number;
     name: string;
     maxDevices: number;
+    maxConcurrentSessions: number;
     expiresAt: string;
     autoRenew: boolean;
   } | null;

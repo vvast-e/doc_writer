@@ -10,6 +10,7 @@ export interface RedeemResult {
     subscriptionId: number;
     name: string;
     maxDevices: number;
+    maxConcurrentSessions: number;
     expiresAt: string;
   } | null;
 }

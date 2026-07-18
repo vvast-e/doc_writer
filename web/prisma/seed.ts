@@ -5,9 +5,9 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 const subscriptions = [
-  { id: 1, name: 'Месячная', price: 399, period: 1, max_devices: 1, sort_order: 10 },
-  { id: 2, name: 'Студенческая', price: 1899, period: 6, max_devices: 2, sort_order: 20 },
-  { id: 3, name: 'Годовая', price: 3299, period: 12, max_devices: 3, sort_order: 30 },
+  { id: 1, name: 'Месячная', price: 399, period: 1, max_devices: 1, max_concurrent_sessions: 1, sort_order: 10 },
+  { id: 2, name: 'Студенческая', price: 1899, period: 6, max_devices: 2, max_concurrent_sessions: 2, sort_order: 20 },
+  { id: 3, name: 'Годовая', price: 3299, period: 12, max_devices: 3, max_concurrent_sessions: 3, sort_order: 30 },
 ];
 
 async function main() {

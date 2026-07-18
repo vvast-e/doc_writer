@@ -48,6 +48,7 @@ export async function redeemPairingCode(
             subscriptionId: activeSubscription.subscription_id,
             name: activeSubscription.subscription.name,
             maxDevices: activeSubscription.subscription.max_devices,
+            maxConcurrentSessions: activeSubscription.subscription.max_concurrent_sessions,
             expiresAt: activeSubscription.expires_at.toISOString(),
           }
         : null,

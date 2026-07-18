@@ -50,16 +50,17 @@ model UserOAuthAccount {
 }
 
 model Subscription {
-  id          Int      @id
-  name        String
-  price       Decimal
-  currency    String   @default("RUB")
-  period      Int      @default(1) // 1, 12, 6
-  max_devices Int
-  is_active   Boolean  @default(true)
-  sort_order  Int      @default(100)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id                      Int      @id
+  name                    String
+  price                   Decimal
+  currency                String   @default("RUB")
+  period                  Int      @default(1) // 1, 12, 6
+  max_devices             Int
+  max_concurrent_sessions Int      @default(1) // лимит параллельных сессий печати в приложении
+  is_active               Boolean  @default(true)
+  sort_order              Int      @default(100)
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
 
   userSubscriptions UserSubscription[]
   transactions      Transaction[]

@@ -30,6 +30,7 @@ export async function listSubscriptions(): Promise<SubscriptionCatalogItem[]> {
     currency: s.currency,
     period: s.period,
     maxDevices: s.max_devices,
+    maxConcurrentSessions: s.max_concurrent_sessions,
   }));
 }
 
@@ -105,6 +106,7 @@ export async function getSubscriptionStatus(userId: string): Promise<Subscriptio
     subscriptionId: activeSubscription.subscription_id,
     name: activeSubscription.subscription.name,
     maxDevices: activeSubscription.subscription.max_devices,
+    maxConcurrentSessions: activeSubscription.subscription.max_concurrent_sessions,
     expiresAt: activeSubscription.expires_at.toISOString(),
     autoRenew: activeSubscription.auto_renew,
   };

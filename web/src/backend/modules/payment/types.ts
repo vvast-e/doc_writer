@@ -5,6 +5,7 @@ export interface SubscriptionCatalogItem {
   currency: string;
   period: number;
   maxDevices: number;
+  maxConcurrentSessions: number;
 }
 
 export interface CreatePaymentResult {
@@ -25,6 +26,7 @@ export interface SubscriptionStatusDTO {
   subscriptionId: number;
   name: string;
   maxDevices: number;
+  maxConcurrentSessions: number;
   expiresAt: string;
   autoRenew: boolean;
 }

@@ -1,11 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MdPerson } from "react-icons/md";
+
+interface AuthState {
+    loggedIn: boolean;
+    label: string;
+}
 
 export function Header() {
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [auth, setAuth] = useState<AuthState | null>(null);
+
+    useEffect(() => {
+        fetch("/api/user")
+            .then(async (res) => {
+                if (!res.ok) {
+                    setAuth({ loggedIn: false, label: "" });
+                    return;
+                }
+                const body = await res.json();
+                if (body.ok) {
+                    setAuth({ loggedIn: true, label: body.data.email ?? body.data.name ?? "Профиль" });
+                } else {
+                    setAuth({ loggedIn: false, label: "" });
+                }
+            })
+            .catch(() => setAuth({ loggedIn: false, label: "" }));
+    }, []);
 
     return (
         <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[color-mix(in_oklab,var(--bg-main)_90%,black)]/90 backdrop-blur-md">
@@ -41,23 +64,35 @@ export function Header() {
                     >
                         Оплата
                     </Link>
-                    <Link
-                        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
-                        href="/profile"
-                    >
-                        <MdPerson className="text-base" />
-                        ЛК
-                    </Link>
+                    {auth?.loggedIn && (
+                        <Link
+                            className="inline-flex max-w-[160px] items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
+                            href="/profile"
+                        >
+                            <MdPerson className="text-base shrink-0" />
+                            <span className="truncate">{auth.label}</span>
+                        </Link>
+                    )}
                 </nav>
 
                 {/* Справа: CTA + бургер */}
                 <div className="flex items-center gap-3">
-                    <Link
-                        href="/download"
-                        className="hidden items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-[var(--primary-hover)] hover:shadow-lg md:inline-flex"
-                    >
-                        Попробовать
-                    </Link>
+                    {auth && !auth.loggedIn && (
+                        <Link
+                            href="/auth"
+                            className="hidden text-sm font-semibold text-[var(--text-muted)] transition-colors hover:text-white md:inline-flex"
+                        >
+                            Вход
+                        </Link>
+                    )}
+                    {auth && !auth.loggedIn && (
+                        <Link
+                            href="/auth"
+                            className="hidden items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-[var(--primary-hover)] hover:shadow-lg md:inline-flex"
+                        >
+                            Попробовать
+                        </Link>
+                    )}
 
                     {/* Бургер только на мобиле */}
                     <button
@@ -112,21 +147,34 @@ export function Header() {
                         >
                             Оплата
                         </Link>
-                        <Link
-                            href="/profile"
-                            onClick={() => setMobileOpen(false)}
-                            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
-                        >
-                            <MdPerson className="text-base" />
-                            ЛК
-                        </Link>
-                        <Link
-                            href="/auth"
-                            onClick={() => setMobileOpen(false)}
-                            className="mt-2 inline-flex items-center justify-center rounded-xl bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-[var(--primary-hover)] hover:shadow-lg"
-                        >
-                            Попробовать
-                        </Link>
+
+                        {auth?.loggedIn ? (
+                            <Link
+                                href="/profile"
+                                onClick={() => setMobileOpen(false)}
+                                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
+                            >
+                                <MdPerson className="text-base" />
+                                <span className="truncate">{auth.label}</span>
+                            </Link>
+                        ) : (
+                            <>
+                                <Link
+                                    href="/auth"
+                                    onClick={() => setMobileOpen(false)}
+                                    className="rounded-lg px-2 py-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
+                                >
+                                    Вход
+                                </Link>
+                                <Link
+                                    href="/auth"
+                                    onClick={() => setMobileOpen(false)}
+                                    className="mt-2 inline-flex items-center justify-center rounded-xl bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-[var(--primary-hover)] hover:shadow-lg"
+                                >
+                                    Попробовать
+                                </Link>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

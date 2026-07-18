@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { MdPerson } from "react-icons/md";
 
 export function Header() {
     const [mobileOpen, setMobileOpen] = useState(false);
@@ -39,6 +40,13 @@ export function Header() {
                         href="/payment"
                     >
                         Оплата
+                    </Link>
+                    <Link
+                        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
+                        href="/profile"
+                    >
+                        <MdPerson className="text-base" />
+                        ЛК
                     </Link>
                 </nav>
 
@@ -103,6 +111,14 @@ export function Header() {
                             className="rounded-lg px-2 py-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
                         >
                             Оплата
+                        </Link>
+                        <Link
+                            href="/profile"
+                            onClick={() => setMobileOpen(false)}
+                            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-surface)] hover:text-white"
+                        >
+                            <MdPerson className="text-base" />
+                            ЛК
                         </Link>
                         <Link
                             href="/auth"

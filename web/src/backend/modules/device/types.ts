@@ -14,6 +14,12 @@ export interface RedeemResult {
   } | null;
 }
 
+export interface DeviceDTO {
+  id: string;
+  activatedAt: string;
+  lastSeenAt: string | null;
+}
+
 export type DeviceServiceError =
   | { code: 'INVALID_OR_EXPIRED_CODE' }
   | { code: 'DEVICE_LIMIT_REACHED'; maxDevices: number }

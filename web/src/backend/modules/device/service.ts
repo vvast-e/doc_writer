@@ -6,10 +6,11 @@ import {
   findValidPairingCode,
   getActiveSubscription,
   getLastResetAt,
+  listActiveDevices,
   redeemInTransaction,
   RESET_COOLDOWN_MS,
 } from './repo';
-import type { DeviceServiceError, PairingIssueResult, RedeemResult } from './types';
+import type { DeviceDTO, DeviceServiceError, PairingIssueResult, RedeemResult } from './types';
 
 // Temporary allowance for users without an active subscription — until Phase 4 (payments)
 // ships there is no free tier row in the Subscription table to fall back on.
@@ -52,6 +53,15 @@ export async function redeemPairingCode(
         : null,
     },
   };
+}
+
+export async function listDevices(userId: string): Promise<DeviceDTO[]> {
+  const devices = await listActiveDevices(userId);
+  return devices.map((d) => ({
+    id: d.id,
+    activatedAt: d.activated_at.toISOString(),
+    lastSeenAt: d.last_seen_at?.toISOString() ?? null,
+  }));
 }
 
 export async function resetAllDevices(

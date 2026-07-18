@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MdCheckCircle, MdArrowForward, MdInfo } from "react-icons/md";
 import { FaRegCreditCard } from "react-icons/fa";
 import { SubscriptionAutoRenewToggle } from "@/components/subscription-auto-renew-toggle";
@@ -31,6 +31,12 @@ interface Transaction {
     currency: string;
     description: string;
     status: string;
+}
+
+interface Device {
+    id: string;
+    activatedAt: string;
+    lastSeenAt: string | null;
 }
 
 // Subscription.id -> ChangePlanModal's plan key (seed order: 1 monthly, 2 student, 3 yearly).
@@ -65,12 +71,15 @@ export default function ProfilePage() {
 }
 
 function ProfilePageContent() {
+    const router = useRouter();
     const searchParams = useSearchParams();
     const paymentSuccess = searchParams.get("payment") === "success";
 
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [devices, setDevices] = useState<Device[]>([]);
     const [loading, setLoading] = useState(true);
+    const [unauthenticated, setUnauthenticated] = useState(false);
 
     const [autoRenew, setAutoRenew] = useState(false);
     const [confirmAutoRenew, setConfirmAutoRenew] = useState<null | "on" | "off">(null);
@@ -78,16 +87,27 @@ function ProfilePageContent() {
     const [isChangePlanOpen, setIsChangePlanOpen] = useState(false);
 
     const loadProfile = useCallback(async () => {
-        const [userRes, historyRes] = await Promise.all([
+        const [userRes, historyRes, devicesRes] = await Promise.all([
             fetch("/api/user"),
             fetch("/api/payment/history"),
+            fetch("/api/device"),
         ]);
+
+        if (userRes.status === 401) {
+            setUnauthenticated(true);
+            setLoading(false);
+            return;
+        }
 
         if (userRes.ok) {
             const body = await userRes.json();
             if (body.ok) {
                 setProfile(body.data as UserProfile);
                 setAutoRenew(Boolean(body.data.subscription?.autoRenew));
+            } else {
+                setUnauthenticated(true);
+                setLoading(false);
+                return;
             }
         }
 
@@ -96,12 +116,21 @@ function ProfilePageContent() {
             if (body.ok) setTransactions(body.data as Transaction[]);
         }
 
+        if (devicesRes.ok) {
+            const body = await devicesRes.json();
+            if (body.ok) setDevices(body.data as Device[]);
+        }
+
         setLoading(false);
     }, []);
 
     useEffect(() => {
         loadProfile();
     }, [loadProfile]);
+
+    useEffect(() => {
+        if (unauthenticated) router.push("/auth");
+    }, [unauthenticated, router]);
 
     // Webhook activation can land a couple seconds after the redirect back from checkout —
     // poll briefly so the banner turns into a real "Активна" state without a manual refresh.
@@ -137,13 +166,14 @@ function ProfilePageContent() {
     const handleConfirmResetDevices = async () => {
         await fetch("/api/device/reset", { method: "POST" });
         setConfirmResetDevices(false);
+        loadProfile();
     };
 
     const handleCancelResetDevices = () => {
         setConfirmResetDevices(false);
     };
 
-    if (loading) {
+    if (loading || unauthenticated) {
         return (
             <div className="flex w-full flex-col items-center px-6 py-24 text-[var(--text-muted)]">
                 Загрузка…
@@ -260,13 +290,14 @@ function ProfilePageContent() {
                                         Устройства
                                     </h2>
                                     <p className="text-[12px] md:text-[13px] text-[var(--text-muted)]">
-                                        Лимит:{" "}
+                                        <span className="font-semibold text-white">{devices.length}</span>{" "}
+                                        из{" "}
                                         <span className="font-semibold text-white">{devicesLimit}</span>{" "}
-                                        устройств(о)
+                                        устройств используется
                                     </p>
                                 </div>
 
-                                <DevicesList />
+                                <DevicesList devices={devices} />
 
                                 <div className="mt-5 flex items-center justify-between text-[12px] md:text-[13px] text-[var(--text-muted)]">
                                     <p>Если видишь незнакомое устройство — сбрось все активации.</p>

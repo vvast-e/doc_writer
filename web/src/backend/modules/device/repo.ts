@@ -37,6 +37,13 @@ export async function countActiveDevices(userId: string): Promise<number> {
   return prisma.device.count({ where: { user_id: userId, is_active: true } });
 }
 
+export async function listActiveDevices(userId: string) {
+  return prisma.device.findMany({
+    where: { user_id: userId, is_active: true },
+    orderBy: { activated_at: 'desc' },
+  });
+}
+
 export async function getActiveSubscription(userId: string) {
   return prisma.userSubscription.findFirst({
     where: { user_id: userId, is_active: true },
